@@ -1,5 +1,22 @@
-add_library(zbarLib decoder/code39.c decoder/code128.c decoder/ean.c decoder/i25.c decoder/qr_finder.c qrcode/bch15_5.c qrcode/binarize.c qrcode/isaac.c qrcode/qrdec.c  qrcode/qrdectxt.c qrcode/rs.c qrcode/util.c config.c decoder.c error.c image.c img_scanner.c refcnt.c scanner.c symbol.c)
+cmake_minimum_required(VERSION 3.10)
 
-include_directories("${PROJECT_SOURCE_DIR}/zbar_lib/qrcode")
-include_directories("${PROJECT_SOURCE_DIR}/zbar_lib/decode")
+project(zbar_app)
 
+#set_property(TARGET zbar_app PROPERTY C_STANDARD 99)
+set(CMAKE_C_FLAGS "-std=c99")
+
+SET(CMAKE_C_COMPILER   arm-linux-gnueabihf-gcc)
+SET(CMAKE_CXX_COMPILER arm-linux-gnueabihf-g++)
+
+#SET(CMAKE_C_COMPILER   gcc)
+#SET(CMAKE_CXX_COMPILER g++)
+
+aux_source_directory(. DIR_SRCS)
+
+include_directories("${PROJECT_SOURCE_DIR}/zbar_lib")
+add_subdirectory(zbar_lib)
+
+
+add_executable(zbar_app ${DIR_SRCS})
+
+target_link_libraries(zbar_app zbarLib)
