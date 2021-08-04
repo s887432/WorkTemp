@@ -1,0 +1,16 @@
+struct ContentView: View {
+  @State private var showAlert = false
+  var body: some View {
+     Button(action: {
+        showAlert = true
+     }) {
+        VStack {
+           Image("rabbit")
+           Text("你還愛我嗎")
+        }
+     }.alert(isPresented: $showAlert) { () -> Alert in
+        let answer = ["愛", "不愛"].randomElement()!
+        return Alert(title: Text(answer))
+     }
+   }
+}
