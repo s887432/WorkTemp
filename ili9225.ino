@@ -189,3 +189,59 @@ void lcd_init_command_list(void)
 
     
 }
+
+
+void fill_rectangle(char x1, char y1, char x2, char y2, unsigned int colour) {
+    //If landscape view then translate everyting -90 degrees
+    if(LANDSCAPE) {
+        swap_char(&x1, &y1);
+        swap_char(&x2, &y2);
+        y1 = WIDTH - y1;
+        y2 = WIDTH - y2;
+        swap_char(&y2, &y1);
+    }
+    
+    //Split the colour int in to two bytes
+    unsigned char colour_high = colour >> 8;
+    unsigned char colour_low = colour & 0xFF;
+    
+    //Set the drawing region
+    set_draw_window(x1, y1, x2, y2);
+    
+    //We will do the SPI write manually here for speed
+    //( the data sheet says it doesn't matter if CSX changes between 
+    // data sections but I don't trust it.)
+    //CSX low to begin data
+    HAL_GPIO_WritePin(CSX_PORT, CSX_PIN, GPIO_PIN_RESET);
+
+    //Write colour to each pixel
+    for(int y = 0; y < y2-y1+1 ; y++) {
+        for(int x = 0; x < x2-x1+1; x++) {
+            lcd_write_data(colour_high);
+            lcd_write_data(colour_low);
+        }
+    }
+    //Return CSX to high
+    HAL_GPIO_WritePin(CSX_PORT, CSX_PIN, GPIO_PIN_SET);
+}
+
+void set_draw_window(char x1, char y1, char x2, char y2) {
+    
+    //Check that the values are in order
+    if(x2 < x1)
+        swap_char(&x2, &x1);
+    if(y2 < y1)
+        swap_char(&y2, &y1);
+
+    lcd_write_register(ILI9225_HORIZONTAL_WINDOW_ADDR1,x2);
+    lcd_write_register(ILI9225_HORIZONTAL_WINDOW_ADDR2,x1);
+
+    lcd_write_register(ILI9225_VERTICAL_WINDOW_ADDR1,y2);
+    lcd_write_register(ILI9225_VERTICAL_WINDOW_ADDR2,y1);
+
+    lcd_write_register(ILI9225_RAM_ADDR_SET1,x1);
+    lcd_write_register(ILI9225_RAM_ADDR_SET2,y1);
+
+    lcd_write_command(0x00);
+    lcd_write_command(0x22);
+}
