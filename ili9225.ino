@@ -245,3 +245,9 @@ void set_draw_window(char x1, char y1, char x2, char y2) {
     lcd_write_command(0x00);
     lcd_write_command(0x22);
 }
+
+void swap_char(char *num1, char *num2) {
+    char temp = *num2;
+    *num2 = *num1;
+    *num1 = temp;
+}
