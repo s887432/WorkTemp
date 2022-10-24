@@ -1,0 +1,176 @@
+diff --git a/arch/arm/boot/dts/at91-sam9x60_curiosity.dts b/arch/arm/boot/dts/at91-sam9x60_curiosity.dts
+index 75e6727b5e3a..d856b72b4541 100644
+--- a/arch/arm/boot/dts/at91-sam9x60_curiosity.dts
++++ b/arch/arm/boot/dts/at91-sam9x60_curiosity.dts
+@@ -222,6 +222,28 @@ eeprom@53 {
+ 	};
+ };
+ 
++&flx5 {
++	atmel,flexcom-mode = <ATMEL_FLEXCOM_MODE_SPI>;
++	status = "okay";
++
++	spi5: spi@400 {
++		#address-cells = <1>;
++		#size-cells = <0>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&pinctrl_mikrobus1_spi &pinctrl_mikrobus1_spi_cs>;
++		status = "okay";
++		
++		display@0{
++			compatible = "adafruit,yx240qv29","ilitek,ili9341";
++			reg = <0>;
++			spi-max-frequency = <30000000>;
++			dc = <AT91_PIOB 14 AT91_PERIPH_GPIO AT91_PINCTRL_PULL_UP>;
++			reset = <AT91_PIOB 13 AT91_PERIPH_GPIO AT91_PINCTRL_PULL_UP>;
++			rotation = <270>;
++		};
++	};
++};
++
+ &flx6 {
+ 	atmel,flexcom-mode = <ATMEL_FLEXCOM_MODE_TWI>;
+ 	status = "okay";
+@@ -357,6 +379,18 @@ pinctrl_flx7_default: flx7_usart {
+ 				<AT91_PIOC 0 AT91_PERIPH_C AT91_PINCTRL_NONE
+ 				 AT91_PIOC 1 AT91_PERIPH_C AT91_PINCTRL_NONE>;
+ 		};
++		
++		pinctrl_mikrobus1_spi_cs: mikrobus1_spi_cs {
++			atmel,pins = <AT91_PIOA 8 AT91_PERIPH_GPIO AT91_PINCTRL_PULL_UP>;
++			bias-disable;
++		};
++
++		pinctrl_mikrobus1_spi: mikrobus1_spi {
++			atmel,pins = <AT91_PIOA 22 AT91_PERIPH_GPIO AT91_PINCTRL_PULL_UP
++						  AT91_PIOA 21 AT91_PERIPH_GPIO AT91_PINCTRL_PULL_UP
++						  AT91_PIOA 23 AT91_PERIPH_GPIO AT91_PINCTRL_PULL_UP>;
++			bias-disable;
++		};
+ 	};
+ 
+ 	gpio_keys {
+@@ -461,6 +495,9 @@ pinctrl_usb_default: usb_default {
+ 				      AT91_PIOD 15 AT91_PERIPH_GPIO AT91_PINCTRL_NONE>;
+ 		};
+ 	};
++	
++
++	
+ }; /* pinctrl */
+ 
+ &pwm0 {
+diff --git a/drivers/gpu/drm/drm_mipi_dbi.c b/drivers/gpu/drm/drm_mipi_dbi.c
+index 71b646c4131f..d3cb24c231f6 100644
+--- a/drivers/gpu/drm/drm_mipi_dbi.c
++++ b/drivers/gpu/drm/drm_mipi_dbi.c
+@@ -1073,17 +1073,19 @@ static int mipi_dbi_typec3_command(struct mipi_dbi *dbi, u8 *cmd,
+ 	MIPI_DBI_DEBUG_COMMAND(*cmd, par, num);
+ 
+ 	gpiod_set_value_cansleep(dbi->dc, 0);
+-	speed_hz = mipi_dbi_spi_cmd_max_speed(spi, 1);
++	//speed_hz = mipi_dbi_spi_cmd_max_speed(spi, 1);
++	speed_hz = spi->max_speed_hz;
+ 	ret = mipi_dbi_spi_transfer(spi, speed_hz, 8, cmd, 1);
+ 	if (ret || !num)
+ 		return ret;
+ 
+-	if (*cmd == MIPI_DCS_WRITE_MEMORY_START && !dbi->swap_bytes)
+-		bpw = 16;
++	//if (*cmd == MIPI_DCS_WRITE_MEMORY_START && !dbi->swap_bytes)
++	//	bpw = 16;
+ 
+ 	gpiod_set_value_cansleep(dbi->dc, 1);
+-	speed_hz = mipi_dbi_spi_cmd_max_speed(spi, num);
+-
++	//speed_hz = mipi_dbi_spi_cmd_max_speed(spi, num);
++	speed_hz = spi->max_speed_hz;
++	
+ 	return mipi_dbi_spi_transfer(spi, speed_hz, bpw, par, num);
+ }
+ 
+diff --git a/drivers/gpu/drm/tiny/ili9341.c b/drivers/gpu/drm/tiny/ili9341.c
+index 37e0c33399c8..4f8c4a9fe27f 100644
+--- a/drivers/gpu/drm/tiny/ili9341.c
++++ b/drivers/gpu/drm/tiny/ili9341.c
+@@ -59,20 +59,25 @@ static void yx240qv29_enable(struct drm_simple_display_pipe *pipe,
+ 	u8 addr_mode;
+ 	int ret, idx;
+ 
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	if (!drm_dev_enter(pipe->crtc.dev, &idx))
+ 		return;
+ 
+ 	DRM_DEBUG_KMS("\n");
+ 
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	ret = mipi_dbi_poweron_conditional_reset(dbidev);
+ 	if (ret < 0)
+ 		goto out_exit;
+ 	if (ret == 1)
+ 		goto out_enable;
+ 
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	mipi_dbi_command(dbi, MIPI_DCS_SET_DISPLAY_OFF);
+-
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
++	
+ 	mipi_dbi_command(dbi, ILI9341_PWCTRLB, 0x00, 0xc1, 0x30);
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	mipi_dbi_command(dbi, ILI9341_PWRSEQ, 0x64, 0x03, 0x12, 0x81);
+ 	mipi_dbi_command(dbi, ILI9341_DTCTRLA, 0x85, 0x00, 0x78);
+ 	mipi_dbi_command(dbi, ILI9341_PWCTRLA, 0x39, 0x2c, 0x00, 0x34, 0x02);
+@@ -180,8 +185,11 @@ static int ili9341_probe(struct spi_device *spi)
+ 	struct mipi_dbi *dbi;
+ 	struct gpio_desc *dc;
+ 	u32 rotation = 0;
++	u32 speed_hz = 0;
+ 	int ret;
+ 
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
++	
+ 	dbidev = devm_drm_dev_alloc(dev, &ili9341_driver,
+ 				    struct mipi_dbi_dev, drm);
+ 	if (IS_ERR(dbidev))
+@@ -191,30 +199,41 @@ static int ili9341_probe(struct spi_device *spi)
+ 	drm = &dbidev->drm;
+ 
+ 	dbi->reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	if (IS_ERR(dbi->reset))
+ 		return dev_err_probe(dev, PTR_ERR(dbi->reset), "Failed to get GPIO 'reset'\n");
+ 
+ 	dc = devm_gpiod_get_optional(dev, "dc", GPIOD_OUT_LOW);
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	if (IS_ERR(dc))
+ 		return dev_err_probe(dev, PTR_ERR(dc), "Failed to get GPIO 'dc'\n");
+ 
+ 	dbidev->backlight = devm_of_find_backlight(dev);
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	if (IS_ERR(dbidev->backlight))
+ 		return PTR_ERR(dbidev->backlight);
+ 
+ 	device_property_read_u32(dev, "rotation", &rotation);
++	device_property_read_u32(dev, "speed_hz", &speed_hz);
++	spi->max_speed_hz = speed_hz;
+ 
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	ret = mipi_dbi_spi_init(spi, dbi, dc);
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	if (ret)
+ 		return ret;
+ 
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	ret = mipi_dbi_dev_init(dbidev, &ili9341_pipe_funcs, &yx240qv29_mode, rotation);
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	if (ret)
+ 		return ret;
+ 
+ 	drm_mode_config_reset(drm);
+ 
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	ret = drm_dev_register(drm, 0);
++	printk(KERN_INFO "[ili9341] %s @ %d\r\n", __func__, __LINE__);
+ 	if (ret)
+ 		return ret;
+ 
