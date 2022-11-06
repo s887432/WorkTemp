@@ -1,0 +1,1 @@
+mklink /d "C:\Users\Haruka\Apple\MobileSync\Backup" "D:\backup\iTune backup"
