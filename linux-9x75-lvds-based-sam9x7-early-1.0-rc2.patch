@@ -1,0 +1,159 @@
+diff --git a/arch/arm/boot/dts/at91-sam9x75eb.dts b/arch/arm/boot/dts/at91-sam9x75eb.dts
+index 13b7cc59fae9..55f7dfc6e6bb 100644
+--- a/arch/arm/boot/dts/at91-sam9x75eb.dts
++++ b/arch/arm/boot/dts/at91-sam9x75eb.dts
+@@ -79,7 +79,7 @@ panel {
+ 		compatible = "raspberrypi,7inch-dsi", "simple-panel";
+ 		backlight = <&reg_display>;
+ 		power-supply = <&reg_display>;
+-		status = "okay";
++		status = "disabled";
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;
+ 
+@@ -92,6 +92,26 @@ panel_in: endpoint {
+ 		};
+ 	};
+ 
++        panel_lvds {
++                compatible = "pda,91-00156-a0", "simple-panel";
++                //backlight = <&backlight>;
++                //power-supply = <&panel_reg>;
++                #address-cells = <1>;
++                #size-cells = <0>;
++                status = "okay";
++
++                port@0 {
++                        reg = <0>;
++                        #address-cells = <1>;
++                        #size-cells = <0>;
++
++                        panel_in_lvds: endpoint@0 {
++                                reg = <0>;
++                                remote-endpoint = <&hlcdc_panel_output>;
++                        };
++                };
++        };
++
+ 	/* Fixed Regulator for the DSI to DPI Bridge */
+ 	reg_bridge: reg_bridge@0 {
+ 		compatible = "regulator-fixed";
+@@ -99,7 +119,7 @@ reg_bridge: reg_bridge@0 {
+ 		vin-supply = <&reg_display>;
+ 		gpio = <&reg_display 0 0>;
+ 		enable-active-high;
+-		status = "okay";
++		status = "disabled";
+ 	};
+ };
+ 
+@@ -134,7 +154,7 @@ &dma0 {
+ };
+ 
+ &dsi {
+-	status = "okay";
++	status = "disabled";
+ 	#address-cells = <1>;
+ 	#size-cells = <0>;
+ 
+@@ -161,7 +181,7 @@ bridge@0 {
+ 		reg = <0x0>;
+ 		compatible = "toshiba,tc358762";
+ 		vddc-supply = <&reg_bridge>;
+-		status = "okay";
++		status = "disabled";
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;
+ 
+@@ -232,7 +252,7 @@ ft5406: ts@38 {
+ 			reset-gpio = <&reg_display 1 1>;
+ 			touchscreen-inverted-x;
+ 			touchscreen-inverted-y;
+-			status = "okay";
++			status = "disabled";
+ 		};
+ 
+ 		mcp16502@5b {
+@@ -344,7 +364,7 @@ reg_display: reg_display@45 {
+ 			reg = <0x45>;
+ 			gpio-controller;
+ 			#gpio-cells = <2>;
+-			status = "okay";
++			status = "disabled";
+ 		};
+ 	};
+ };
+@@ -381,7 +401,7 @@ port@0 {
+ 			#size-cells = <0>;
+ 			hlcdc_panel_output: endpoint@0 {
+ 				reg = <0>;
+-				remote-endpoint = <&dsi_in>;
++				remote-endpoint = <&panel_in_lvds>;
+ 			};
+ 		};
+ 	};
+@@ -504,9 +524,11 @@ AT91_PIOB 2  AT91_PERIPH_A  AT91_PINCTRL_SLEWRATE_DIS				/* ETH_125CK */
+ 
+ 	ohci0 {
+ 		pinctrl_usb_default: usb_default {
+-			atmel,pins = <AT91_PIOC 27 AT91_PERIPH_GPIO AT91_PINCTRL_NONE
+-				      AT91_PIOC 29 AT91_PERIPH_GPIO AT91_PINCTRL_NONE>;
+-		};
++			atmel,pins = <AT91_PIOC 27 AT91_PERIPH_A AT91_PINCTRL_NONE
++				AT91_PIOC 29 AT91_PERIPH_A AT91_PINCTRL_NONE
++				AT91_PIOC 28 AT91_PERIPH_A AT91_PINCTRL_NONE
++				AT91_PIOC 30 AT91_PERIPH_A AT91_PINCTRL_NONE>;
++			};
+ 	};
+ 
+ 	sdmmc0 {
+diff --git a/arch/arm/configs/at91_dt_defconfig b/arch/arm/configs/at91_dt_defconfig
+index fc30b913dfb8..a6e5c63ef9e0 100644
+--- a/arch/arm/configs/at91_dt_defconfig
++++ b/arch/arm/configs/at91_dt_defconfig
+@@ -161,7 +161,12 @@ CONFIG_MEDIA_PLATFORM_SUPPORT=y
+ CONFIG_MEDIA_USB_SUPPORT=y
+ CONFIG_USB_VIDEO_CLASS=m
+ CONFIG_V4L_PLATFORM_DRIVERS=y
++CONFIG_VIDEO_ATMEL_XISC=y
+ CONFIG_VIDEO_ATMEL_ISI=y
++CONFIG_VIDEO_MICROCHIP_CSI2DC=y
++CONFIG_DWC_MIPI_CSI2_HOST=m
++CONFIG_DWC_MIPI_DPHY_GEN3=m
++CONFIG_VIDEO_IMX219=m
+ CONFIG_VIDEO_OV2640=m
+ CONFIG_VIDEO_OV7740=m
+ CONFIG_VIDEO_MT9V032=m
+diff --git a/drivers/gpu/drm/panel/panel-simple.c b/drivers/gpu/drm/panel/panel-simple.c
+index 04264ebef0e9..fc5127e1d14e 100644
+--- a/drivers/gpu/drm/panel/panel-simple.c
++++ b/drivers/gpu/drm/panel/panel-simple.c
+@@ -3615,6 +3615,20 @@ static const struct panel_desc osddisplays_osd070t1718_19ts = {
+ 	.connector_type = DRM_MODE_CONNECTOR_DPI,
+ };
+ 
++// haha
++#if 1
++static const struct drm_display_mode pda_91_00156_a0_mode = {
++	.clock = 33300,
++	.hdisplay = 1024,
++	.hsync_start = 1024 + 150,
++	.hsync_end = 1024 + 150 + 20,
++	.htotal = 1024 + 150 + 20 + 150,
++	.vdisplay = 768,
++	.vsync_start = 768 + 16,
++	.vsync_end = 768 + 16 + 6,
++	.vtotal = 768 + 16 + 6 + 16,
++};
++#else
+ static const struct drm_display_mode pda_91_00156_a0_mode = {
+ 	.clock = 33300,
+ 	.hdisplay = 800,
+@@ -3626,6 +3640,7 @@ static const struct drm_display_mode pda_91_00156_a0_mode = {
+ 	.vsync_end = 480 + 1 + 23,
+ 	.vtotal = 480 + 1 + 23 + 22,
+ };
++#endif
+ 
+ static const struct panel_desc pda_91_00156_a0  = {
+ 	.modes = &pda_91_00156_a0_mode,
