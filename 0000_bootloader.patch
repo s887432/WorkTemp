@@ -1,0 +1,210 @@
+diff --git a/Config.in.u-boot b/Config.in.u-boot
+index f65b207e..47221a2d 100644
+--- a/Config.in.u-boot
++++ b/Config.in.u-boot
+@@ -13,6 +13,15 @@ config IMG_ADDRESS
+ 	default "0x00040000" if NANDFLASH
+ 	default	"0x00000000" if SDCARD
+ 
++config CONFIG_ADDRESS
++	string "Flash offset for boot configure"
++	depends on NANDFLASH
++	default "0x00040000" if NANDFLASH
++
++config CONFIG_SIZE
++	string "Flash offset for boot configure"
++	depends on NANDFLASH
++	default "4" if NANDFLASH
+ 
+ config IMG_SIZE
+ 	string "U-Boot Image Size"
+diff --git a/Makefile b/Makefile
+index 06f808db..c7bc7892 100644
+--- a/Makefile
++++ b/Makefile
+@@ -162,6 +162,8 @@ IMAGE_NAME:= $(strip $(subst ",,$(CONFIG_IMAGE_NAME)))
+ CARD_SUFFIX := $(strip $(subst ",,$(CONFIG_CARD_SUFFIX)))
+ LINUX_KERNEL_ARG_STRING := $(strip $(subst ",,$(CONFIG_LINUX_KERNEL_ARG_STRING)))
+ LINUX_KERNEL_ARG_STRING_FILE := $(strip $(subst ",,$(CONFIG_LINUX_KERNEL_ARG_STRING_FILE)))
++CONFIG_SIZE := $(strip $(subst ",,$(CONFIG_CONFIG_SIZE)))
++CONFIG_ADDRESS := $(strip $(subst ",,$(CONFIG_CONFIG_ADDRESS)))
+ 
+ # Device definitions
+ DEVICENAME:=$(strip $(subst ",,$(CONFIG_DEVICENAME)))
+diff --git a/driver/common.c b/driver/common.c
+index 5a7598a9..8aa46ad0 100644
+--- a/driver/common.c
++++ b/driver/common.c
+@@ -10,6 +10,8 @@
+ #include "string.h"
+ #include "usart.h"
+ 
++#include "debug.h"
++
+ #ifdef CONFIG_LOAD_SW
+ load_function load_image;
+ #endif
+@@ -55,6 +57,23 @@ unsigned int get_image_load_offset(unsigned int addr)
+ }
+ #endif
+ 
++#if defined(CONFIG_NANDFLASH)
++void init_load_config(struct image_info *image, struct bootconfig_info *bootconfig)
++{
++	memset(image, 0, sizeof(*image));
++	image->length = CONFIG_SIZE;
++	image->offset = get_image_load_offset(CONFIG_ADDRESS);
++	if ( !load_config_nandflash(image, bootconfig) )
++	{
++		usart_puts("Load config error\n");
++		while(1);
++	}
++	
++	dbg_info("CONFIG: load address = %x\r\n", bootconfig->primary_address);
++	dbg_info("CONFIG: load address = %x\r\n", bootconfig->secondary_address);
++}
++#endif
++
+ void init_load_image(struct image_info *image)
+ {
+ 	memset(image,		0, sizeof(*image));
+diff --git a/driver/nandflash.c b/driver/nandflash.c
+index 4eda9c90..1ce73ac6 100644
+--- a/driver/nandflash.c
++++ b/driver/nandflash.c
+@@ -1408,3 +1408,60 @@ int load_nandflash(struct image_info *image)
+ 
+ 	return 0;
+  }
++
++int load_config_nandflash(struct image_info *image, struct bootconfig_info *bootconfig)
++{
++	struct nand_info nand;
++	int ret;
++
++	nandflash_hw_init();
++
++	if (nandflash_get_type(&nand))
++		return -1;
++
++#ifdef CONFIG_NANDFLASH_RECOVERY
++	if (nandflash_recovery(&nand) == 0)
++		return -2;
++#endif
++
++#ifdef CONFIG_USE_PMECC
++	if (init_pmecc(&nand))
++		return -1;
++#endif
++
++#ifdef CONFIG_ENABLE_SW_ECC
++	dbg_info("NAND: Using Software ECC\n");
++#endif
++
++#if defined(CONFIG_LOAD_LINUX) || defined(CONFIG_LOAD_ANDROID)
++	int length = update_image_length(&nand,
++				image->offset, image->dest, KERNEL_IMAGE);
++	if (length == -1)
++		return -1;
++
++	image->length = length;
++#endif
++
++	ret = nand_loadimage(&nand, image->offset, image->length, (unsigned char*)bootconfig);
++	if (ret)
++		return ret;
++
++#ifdef CONFIG_OF_LIBFDT
++	length = update_image_length(&nand,
++			image->of_offset, image->of_dest, DT_BLOB);
++	if (length == -1)
++		return -1;
++
++	image->of_length = length;
++
++	dbg_info("NAND: dt blob: Copy %x bytes from %x to %x\n",
++		image->of_length, image->of_offset, image->of_dest);
++
++	ret = nand_loadimage(&nand, image->of_offset,
++				image->of_length, image->of_dest);
++	if (ret)
++		return ret;
++#endif
++
++	return 0;
++ }
+diff --git a/include/common.h b/include/common.h
+index 79eb7375..985036d5 100644
+--- a/include/common.h
++++ b/include/common.h
+@@ -55,6 +55,12 @@ struct image_info
+ #endif
+ };
+ 
++struct bootconfig_info
++{
++	unsigned int primary_address;
++	unsigned int secondary_address;
++};
++
+ typedef int (*load_function)(struct image_info *image);
+ 
+ #ifdef CONFIG_LOAD_SW
+@@ -68,10 +74,12 @@ unsigned int get_image_load_offset(unsigned int addr);
+ extern load_function load_image;
+ 
+ extern void init_load_image(struct image_info *image);
++extern void init_load_config(struct image_info *image, struct bootconfig_info *bootconfig);
+ 
+ extern int load_kernel(struct image_info *image);
+ 
+ extern int kernel_size(unsigned char *addr);
++
+ #endif
+ 
+ extern void load_image_done(int retval);
+diff --git a/include/nandflash.h b/include/nandflash.h
+index 00c234dd..a580480d 100644
+--- a/include/nandflash.h
++++ b/include/nandflash.h
+@@ -8,5 +8,6 @@
+ #define __NANDFLASH_H__
+ 
+ extern int load_nandflash(struct image_info *image);
++extern int load_config_nandflash(struct image_info *image, struct bootconfig_info *bootconfig);
+ 
+ #endif /* #ifndef __NANDFLASH_H__ */
+diff --git a/main.c b/main.c
+index 742df8d0..ccbe1f88 100644
+--- a/main.c
++++ b/main.c
+@@ -37,6 +37,7 @@ int main(void)
+ {
+ #ifdef CONFIG_LOAD_SW
+ 	struct image_info image;
++	struct bootconfig_info bootconfig;
+ #endif
+ 	int ret = 0;
+ 
+@@ -100,6 +101,8 @@ int main(void)
+ 	hw_postinit();
+ #endif
+ 
++	init_load_config(&image, &bootconfig);
++
+ #ifdef CONFIG_LOAD_SW
+ 	init_load_image(&image);
+ 
+diff --git a/toplevel_cpp.mk b/toplevel_cpp.mk
+index e2dd4858..ffdcd6ee 100644
+--- a/toplevel_cpp.mk
++++ b/toplevel_cpp.mk
+@@ -3,6 +3,8 @@
+ # SPDX-License-Identifier: MIT
+ 
+ CPPFLAGS += \
++	-DCONFIG_SIZE=$(CONFIG_SIZE)	\
++	-DCONFIG_ADDRESS=$(CONFIG_ADDRESS)	\
+ 	-DIMG_ADDRESS=$(IMG_ADDRESS)	\
+ 	-DIMG_SIZE=$(IMG_SIZE)		\
+ 	-DMMU_TABLE_BASE_ADDR=$(MMU_TABLE_BASE_ADDR)	\
