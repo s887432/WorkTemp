@@ -1,0 +1,48 @@
+diff --git a/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts b/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts
+index 899255e6bfa1..7a968dcca8dd 100644
+--- a/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts
++++ b/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts
+@@ -59,6 +59,27 @@ led_blue: led-blue {
+ 			linux,default-trigger = "heartbeat";
+ 			status = "okay";
+ 		};
++		
++		led_ext1: led-ext1 {
++			pinctrl-0 = <&pinctrl_ext1_led_gpio_default>;
++			label = "ext1";
++			gpios = <&pioA 21 GPIO_ACTIVE_HIGH>;
++			status = "okay";
++		};
++		
++		led_ext2: led-ext2 {
++			pinctrl-0 = <&pinctrl_ext2_led_gpio_default>;
++			label = "ext2";
++			gpios = <&pioC 12 GPIO_ACTIVE_HIGH>;
++			status = "okay";
++		};
++		
++		led_ext3: led-ext3 {
++			pinctrl-0 = <&pinctrl_ext3_led_gpio_default>;
++			label = "ext3";
++			gpios = <&pioC 14 GPIO_ACTIVE_HIGH>;
++			status = "okay";
++		};
+ 	};
+ 
+ 	memory@20000000 {
+@@ -354,6 +375,15 @@ pinctrl_green_led_gpio_default: green-led-gpio-default {
+ 		pinctrl_blue_led_gpio_default: blue-led-gpio-default {
+ 			atmel,pins = <AT91_PIOC 20 AT91_PERIPH_GPIO AT91_PINCTRL_NONE>;
+ 		};
++		pinctrl_ext1_led_gpio_default: ext1-led-gpio-default {
++			atmel,pins = <AT91_PIO! 21 AT91_PERIPH_GPIO AT91_PINCTRL_NONE>;
++		};
++		pinctrl_ext2_led_gpio_default: ext2-led-gpio-default {
++			atmel,pins = <AT91_PIOC 12 AT91_PERIPH_GPIO AT91_PINCTRL_NONE>;
++		};
++		pinctrl_ext3_led_gpio_default: ext3-led-gpio-default {
++			atmel,pins = <AT91_PIOC 14 AT91_PERIPH_GPIO AT91_PINCTRL_NONE>;
++		};
+ 	};
+ 
+ 	nand {
