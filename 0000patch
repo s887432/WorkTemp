@@ -1,0 +1,2326 @@
+diff --git a/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts b/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts
+index 899255e6bfa1..fca4aba00dd5 100644
+--- a/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts
++++ b/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts
+@@ -121,6 +121,40 @@ &ehci0 {
+ 	status = "okay";
+ };
+ 
++&flx3 {
++	atmel,flexcom-mode = <ATMEL_FLEXCOM_MODE_SPI>;
++	status = "okay";
++	
++	spi3: spi@400 {
++		#address-cells =<1>;
++		#size-cells =<0>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&pinctrl_flx3_default>;
++		status = "okay";
++	
++		t1s0: lan865x@0{
++				compatible = "microchip,lan865x","microchip,lan8651", "microchip,lan8650";
++				reg = <0>; /* SPI CE0 */
++				pinctrl-names = "default";
++				pinctrl-0 = <&pinctrl_mikrobus1_int>;
++				
++				plca-enable = /bits/ 8 <0>; /* 1 - PLCA enable, 0 - CSMA/CD enable */
++				plca-node-id = /bits/ 8 <1>; /* PLCA node id range: 0 to 254 */
++				plca-node-count = /bits/ 8 <8>; /* PLCA node count range: 1 to 255 */
++				plca-burst-count = /bits/ 8 <0x0>; /* PLCA burst count range: 0x0 to 0xFF */
++				plca-burst-timer = /bits/ 8 <0x80>; /* PLCA burst timer */
++				plca-to-timer = /bits/ 8 <0x20>; /* PLCA TO value */
++				
++				interrupt-parent = <&pioC>;
++				interrupts = <31 0x2>; /* 0x2 - falling edge trigger */
++				local-mac-address = [04 05 06 01 02 03];
++				spi-max-frequency = <12000000>;
++				status = "okay";
++				#status = "disabled";
++			};
++	};
++};
++
+ &flx6 {
+ 	atmel,flexcom-mode = <ATMEL_FLEXCOM_MODE_TWI>;
+ 	status = "okay";
+@@ -320,6 +354,14 @@ AT91_PIOB 23 AT91_PERIPH_A (AT91_PINCTRL_PULL_UP | AT91_PINCTRL_SLEWRATE_DIS)
+ 	};
+ 
+ 	flexcom {
++		pinctrl_flx3_default: flx3_spi {
++			atmel,pins =
++				<AT91_PIOC 24 AT91_PERIPH_B (AT91_PINCTRL_PULL_DOWN | AT91_PINCTRL_DRIVE_STRENGTH_HI | AT91_PINCTRL_SLEWRATE_DIS)
++				 AT91_PIOC 22 AT91_PERIPH_B (AT91_PINCTRL_NONE)
++				 AT91_PIOC 23 AT91_PERIPH_B (AT91_PINCTRL_NONE)
++				 AT91_PIOC 26 AT91_PERIPH_B (AT91_PINCTRL_NONE)>;	
++		};
++		
+ 		pinctrl_flx6_twi_default: flx6-twi-default {
+ 			atmel,pins =
+ 				<AT91_PIOA 24 AT91_PERIPH_A AT91_PINCTRL_PULL_UP
+@@ -331,6 +373,10 @@ gpio-keys {
+ 		pinctrl_key_gpio_default: key-gpio-default {
+ 			atmel,pins = <AT91_PIOC 9 AT91_PERIPH_GPIO AT91_PINCTRL_NONE>;
+ 		};
++		
++		pinctrl_mikrobus1_int: mikrobus1_int {
++			atmel,pins = <AT91_PIOC 31 AT91_PERIPH_GPIO AT91_PINCTRL_NONE>;
++		};
+ 	};
+ 
+ 	i2s {
+diff --git a/arch/arm/configs/at91_dt_defconfig b/arch/arm/configs/at91_dt_defconfig
+index 5ca8e9a01c7a..8d09cb75e893 100644
+--- a/arch/arm/configs/at91_dt_defconfig
++++ b/arch/arm/configs/at91_dt_defconfig
+@@ -114,6 +114,7 @@ CONFIG_KS8851=m
+ CONFIG_KS8851_MLL=m
+ CONFIG_ENC28J60=m
+ CONFIG_ENCX24J600=m
++CONFIG_LAN865X=y
+ # CONFIG_NET_VENDOR_MICROSOFT is not set
+ # CONFIG_NET_VENDOR_NI is not set
+ # CONFIG_NET_VENDOR_NATSEMI is not set
+@@ -124,6 +125,7 @@ CONFIG_SMSC911X=m
+ # CONFIG_NET_VENDOR_STMICRO is not set
+ CONFIG_DAVICOM_PHY=y
+ CONFIG_MICREL_PHY=y
++CONFIG_MICROCHIP_T1S_PHY=y
+ CONFIG_MICROCHIP_T1_PHY=m
+ CONFIG_MICROSEMI_PHY=m
+ CONFIG_SMSC_PHY=m
+diff --git a/drivers/net/ethernet/Kconfig b/drivers/net/ethernet/Kconfig
+index 5a274b99f299..a0c690d5cabc 100644
+--- a/drivers/net/ethernet/Kconfig
++++ b/drivers/net/ethernet/Kconfig
+@@ -107,6 +107,17 @@ config KORINA
+ 	  If you have a Mikrotik RouterBoard 500 or IDT RC32434
+ 	  based system say Y. Otherwise say N.
+ 
++config OA_TC6
++	tristate "OPEN Alliance TC6 10BASE-T1x MAC-PHY support"
++	depends on SPI
++	select PHYLIB
++	help
++	  This library implements OPEN Alliance TC6 10BASE-T1x MAC-PHY
++	  Serial Interface protocol for supporting 10BASE-T1x MAC-PHYs.
++
++	  To know the implementation details, refer documentation in
++	  <file:Documentation/networking/oa-tc6-framework.rst>.
++	  
+ config LANTIQ_ETOP
+ 	tristate "Lantiq SoC ETOP driver"
+ 	depends on SOC_TYPE_XWAY
+diff --git a/drivers/net/ethernet/Makefile b/drivers/net/ethernet/Makefile
+index 0d872d4efcd1..31fd004874cb 100644
+--- a/drivers/net/ethernet/Makefile
++++ b/drivers/net/ethernet/Makefile
+@@ -53,6 +53,7 @@ obj-$(CONFIG_NET_VENDOR_MICROSOFT) += microsoft/
+ obj-$(CONFIG_NET_VENDOR_XSCALE) += xscale/
+ obj-$(CONFIG_JME) += jme.o
+ obj-$(CONFIG_KORINA) += korina.o
++obj-$(CONFIG_OA_TC6) += oa_tc6.o
+ obj-$(CONFIG_LANTIQ_ETOP) += lantiq_etop.o
+ obj-$(CONFIG_LANTIQ_XRX200) += lantiq_xrx200.o
+ obj-$(CONFIG_NET_VENDOR_LITEX) += litex/
+diff --git a/drivers/net/ethernet/microchip/Kconfig b/drivers/net/ethernet/microchip/Kconfig
+index 43ba71e82260..098d755396a8 100644
+--- a/drivers/net/ethernet/microchip/Kconfig
++++ b/drivers/net/ethernet/microchip/Kconfig
+@@ -57,6 +57,7 @@ config LAN743X
+ 	  called lan743x.
+ 
+ source "drivers/net/ethernet/microchip/lan966x/Kconfig"
++source "drivers/net/ethernet/microchip/lan865x/Kconfig"
+ source "drivers/net/ethernet/microchip/sparx5/Kconfig"
+ source "drivers/net/ethernet/microchip/vcap/Kconfig"
+ 
+diff --git a/drivers/net/ethernet/microchip/Makefile b/drivers/net/ethernet/microchip/Makefile
+index bbd349264e6f..96e9c8960874 100644
+--- a/drivers/net/ethernet/microchip/Makefile
++++ b/drivers/net/ethernet/microchip/Makefile
+@@ -10,5 +10,6 @@ obj-$(CONFIG_LAN743X) += lan743x.o
+ lan743x-objs := lan743x_main.o lan743x_ethtool.o lan743x_ptp.o
+ 
+ obj-$(CONFIG_LAN966X_SWITCH) += lan966x/
++obj-$(CONFIG_LAN865X) += lan865x/
+ obj-$(CONFIG_SPARX5_SWITCH) += sparx5/
+ obj-$(CONFIG_VCAP) += vcap/
+diff --git a/drivers/net/ethernet/microchip/lan865x/Kconfig b/drivers/net/ethernet/microchip/lan865x/Kconfig
+new file mode 100644
+index 000000000000..148866e6c4d9
+--- /dev/null
++++ b/drivers/net/ethernet/microchip/lan865x/Kconfig
+@@ -0,0 +1,20 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Microchip LAN865x Driver Support
++#
++
++if NET_VENDOR_MICROCHIP
++
++config LAN865X
++	tristate "LAN865x support"
++	depends on SPI
++	select OA_TC6
++	help
++	  Support for the Microchip LAN8650/1 Rev.B0/B1 MACPHY Ethernet chip. It
++	  uses OPEN Alliance 10BASE-T1x Serial Interface specification.
++
++	  To compile this driver as a module, choose M here. The module will be
++	  called lan865x.
++
++endif # NET_VENDOR_MICROCHIP
++
+diff --git a/drivers/net/ethernet/microchip/lan865x/Makefile b/drivers/net/ethernet/microchip/lan865x/Makefile
+new file mode 100644
+index 000000000000..c6f94663deb7
+--- /dev/null
++++ b/drivers/net/ethernet/microchip/lan865x/Makefile
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Makefile for the Microchip LAN865x Driver
++#
++
++obj-$(CONFIG_LAN865X) += lan865x.o
+\ No newline at end of file
+diff --git a/drivers/net/ethernet/microchip/lan865x/lan865x.c b/drivers/net/ethernet/microchip/lan865x/lan865x.c
+new file mode 100644
+index 000000000000..03160d344285
+--- /dev/null
++++ b/drivers/net/ethernet/microchip/lan865x/lan865x.c
+@@ -0,0 +1,411 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Microchip's LAN865x 10BASE-T1S MAC-PHY driver
++ *
++ * Author: Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
++ */
++
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/phy.h>
++#include <linux/oa_tc6.h>
++
++#define DRV_NAME			"lan865x"
++
++/* MAC Network Control Register */
++#define LAN865X_REG_MAC_NET_CTL		0x00010000
++#define MAC_NET_CTL_TXEN		BIT(3) /* Transmit Enable */
++#define MAC_NET_CTL_RXEN		BIT(2) /* Receive Enable */
++
++#define LAN865X_REG_MAC_NET_CFG		0x00010001 /* MAC Network Configuration Reg */
++#define MAC_NET_CFG_PROMISCUOUS_MODE	BIT(4)
++#define MAC_NET_CFG_MULTICAST_MODE	BIT(6)
++#define MAC_NET_CFG_UNICAST_MODE	BIT(7)
++
++#define LAN865X_REG_MAC_L_HASH		0x00010020 /* MAC Hash Register Bottom */
++#define LAN865X_REG_MAC_H_HASH		0x00010021 /* MAC Hash Register Top */
++#define LAN865X_REG_MAC_L_SADDR1	0x00010022 /* MAC Specific Addr 1 Bottom Reg */
++#define LAN865X_REG_MAC_H_SADDR1	0x00010023 /* MAC Specific Addr 1 Top Reg */
++
++/* LAN8650/1 configuration fixup from AN1760 */
++#define LAN865X_FIXUP_REG		0x00010077
++#define LAN865X_FIXUP_VALUE		0x0028
++
++/* OPEN Alliance Configuration Register #0 */
++#define OA_TC6_REG_CONFIG0		0x0004
++#define CONFIG0_ZARFE_ENABLE		BIT(12)
++
++struct lan865x_priv {
++	struct work_struct multicast_work;
++	struct net_device *netdev;
++	struct spi_device *spi;
++	struct oa_tc6 *tc6;
++};
++
++static int lan865x_set_hw_macaddr_low_bytes(struct oa_tc6 *tc6, const u8 *mac)
++{
++	u32 regval;
++
++	regval = (mac[3] << 24) | (mac[2] << 16) | (mac[1] << 8) | mac[0];
++
++	return oa_tc6_write_register(tc6, LAN865X_REG_MAC_L_SADDR1, regval);
++}
++
++static int lan865x_set_hw_macaddr(struct lan865x_priv *priv, const u8 *mac)
++{
++	int restore_ret;
++	u32 regval;
++	int ret;
++
++	/* Configure MAC address low bytes */
++	ret = lan865x_set_hw_macaddr_low_bytes(priv->tc6, mac);
++	if (ret)
++		return ret;
++
++	/* Prepare and configure MAC address high bytes */
++	regval = (mac[5] << 8) | mac[4];
++	ret = oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_H_SADDR1, regval);
++	if (!ret)
++		return 0;
++
++	/* Restore the old MAC address low bytes from netdev if the new MAC
++	 * address high bytes setting failed.
++	 */
++	restore_ret = lan865x_set_hw_macaddr_low_bytes(priv->tc6,
++						       priv->netdev->dev_addr);
++	if (restore_ret)
++		return restore_ret;
++
++	return ret;
++}
++
++static void
++lan865x_get_drvinfo(struct net_device *netdev, struct ethtool_drvinfo *info)
++{
++	strscpy(info->driver, DRV_NAME, sizeof(info->driver));
++	strscpy(info->bus_info, dev_name(netdev->dev.parent),
++		sizeof(info->bus_info));
++}
++
++static const struct ethtool_ops lan865x_ethtool_ops = {
++	.get_drvinfo        = lan865x_get_drvinfo,
++	.get_link_ksettings = phy_ethtool_get_link_ksettings,
++	.set_link_ksettings = phy_ethtool_set_link_ksettings,
++};
++
++static int lan865x_set_mac_address(struct net_device *netdev, void *addr)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++	struct sockaddr *address = addr;
++	int ret;
++
++	ret = eth_prepare_mac_addr_change(netdev, addr);
++	if (ret < 0)
++		return ret;
++
++	if (ether_addr_equal(address->sa_data, netdev->dev_addr))
++		return 0;
++
++	ret = lan865x_set_hw_macaddr(priv, address->sa_data);
++	if (ret)
++		return ret;
++
++	eth_hw_addr_set(netdev, address->sa_data);
++
++	return 0;
++}
++
++static u32 lan865x_hash(u8 addr[ETH_ALEN])
++{
++	return (ether_crc(ETH_ALEN, addr) >> 26) & GENMASK(5, 0);
++}
++
++static void lan865x_set_specific_multicast_addr(struct net_device *netdev)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++	struct netdev_hw_addr *ha;
++	u32 hash_lo = 0;
++	u32 hash_hi = 0;
++
++	netdev_for_each_mc_addr(ha, netdev) {
++		u32 bit_num = lan865x_hash(ha->addr);
++		u32 mask = BIT(bit_num);
++
++		/* 5th bit of the 6 bits hash value is used to determine which
++		 * bit to set in either a high or low hash register.
++		 */
++		if (bit_num & BIT(5))
++			hash_hi |= mask;
++		else
++			hash_lo |= mask;
++	}
++
++	/* Enabling specific multicast addresses */
++	if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_H_HASH, hash_hi)) {
++		netdev_err(netdev, "Failed to write reg_hashh");
++		return;
++	}
++
++	if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_L_HASH, hash_lo))
++		netdev_err(netdev, "Failed to write reg_hashl");
++}
++
++static void lan865x_multicast_work_handler(struct work_struct *work)
++{
++	struct lan865x_priv *priv = container_of(work, struct lan865x_priv,
++						 multicast_work);
++	u32 regval = 0;
++
++	if (priv->netdev->flags & IFF_PROMISC) {
++		/* Enabling promiscuous mode */
++		regval |= MAC_NET_CFG_PROMISCUOUS_MODE;
++		regval &= (~MAC_NET_CFG_MULTICAST_MODE);
++		regval &= (~MAC_NET_CFG_UNICAST_MODE);
++	} else if (priv->netdev->flags & IFF_ALLMULTI) {
++		/* Enabling all multicast mode */
++		regval &= (~MAC_NET_CFG_PROMISCUOUS_MODE);
++		regval |= MAC_NET_CFG_MULTICAST_MODE;
++		regval &= (~MAC_NET_CFG_UNICAST_MODE);
++	} else if (!netdev_mc_empty(priv->netdev)) {
++		lan865x_set_specific_multicast_addr(priv->netdev);
++		regval &= (~MAC_NET_CFG_PROMISCUOUS_MODE);
++		regval &= (~MAC_NET_CFG_MULTICAST_MODE);
++		regval |= MAC_NET_CFG_UNICAST_MODE;
++	} else {
++		/* enabling local mac address only */
++		if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_H_HASH, 0)) {
++			netdev_err(priv->netdev, "Failed to write reg_hashh");
++			return;
++		}
++		if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_L_HASH, 0)) {
++			netdev_err(priv->netdev, "Failed to write reg_hashl");
++			return;
++		}
++	}
++	if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_NET_CFG, regval))
++		netdev_err(priv->netdev,
++			   "Failed to enable promiscuous/multicast/normal mode");
++}
++
++static void lan865x_set_multicast_list(struct net_device *netdev)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++
++	schedule_work(&priv->multicast_work);
++}
++
++static netdev_tx_t lan865x_send_packet(struct sk_buff *skb,
++				       struct net_device *netdev)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++
++	return oa_tc6_start_xmit(priv->tc6, skb);
++}
++
++static int lan865x_hw_disable(struct lan865x_priv *priv)
++{
++	u32 regval;
++
++	if (oa_tc6_read_register(priv->tc6, LAN865X_REG_MAC_NET_CTL, &regval))
++		return -ENODEV;
++
++	regval &= ~(MAC_NET_CTL_TXEN | MAC_NET_CTL_RXEN);
++
++	if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_NET_CTL, regval))
++		return -ENODEV;
++
++	return 0;
++}
++
++static int lan865x_net_close(struct net_device *netdev)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++	int ret;
++
++	netif_stop_queue(netdev);
++	phy_stop(netdev->phydev);
++	ret = lan865x_hw_disable(priv);
++	if (ret) {
++		netdev_err(netdev, "Failed to disable the hardware: %d\n", ret);
++		return ret;
++	}
++
++	return 0;
++}
++
++static int lan865x_hw_enable(struct lan865x_priv *priv)
++{
++	u32 regval;
++
++	if (oa_tc6_read_register(priv->tc6, LAN865X_REG_MAC_NET_CTL, &regval))
++		return -ENODEV;
++
++	regval |= MAC_NET_CTL_TXEN | MAC_NET_CTL_RXEN;
++
++	if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_NET_CTL, regval))
++		return -ENODEV;
++
++	return 0;
++}
++
++static int lan865x_net_open(struct net_device *netdev)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++	int ret;
++
++	ret = lan865x_hw_enable(priv);
++	if (ret) {
++		netdev_err(netdev, "Failed to enable hardware: %d\n", ret);
++		return ret;
++	}
++
++	phy_start(netdev->phydev);
++
++	return 0;
++}
++
++static const struct net_device_ops lan865x_netdev_ops = {
++	.ndo_open		= lan865x_net_open,
++	.ndo_stop		= lan865x_net_close,
++	.ndo_start_xmit		= lan865x_send_packet,
++	.ndo_set_rx_mode	= lan865x_set_multicast_list,
++	.ndo_set_mac_address	= lan865x_set_mac_address,
++};
++
++static int lan865x_configure_fixup(struct lan865x_priv *priv)
++{
++	return oa_tc6_write_register(priv->tc6, LAN865X_FIXUP_REG,
++				     LAN865X_FIXUP_VALUE);
++}
++
++static int lan865x_set_zarfe(struct lan865x_priv *priv)
++{
++	u32 regval;
++	int ret;
++
++	ret = oa_tc6_read_register(priv->tc6, OA_TC6_REG_CONFIG0, &regval);
++	if (ret)
++		return ret;
++
++	/* Set Zero-Align Receive Frame Enable */
++	regval |= CONFIG0_ZARFE_ENABLE;
++
++	return oa_tc6_write_register(priv->tc6, OA_TC6_REG_CONFIG0, regval);
++}
++
++static int lan865x_probe(struct spi_device *spi)
++{
++	struct net_device *netdev;
++	struct lan865x_priv *priv;
++	int ret;
++
++	netdev = alloc_etherdev(sizeof(struct lan865x_priv));
++	if (!netdev)
++		return -ENOMEM;
++
++	priv = netdev_priv(netdev);
++	priv->netdev = netdev;
++	priv->spi = spi;
++	spi_set_drvdata(spi, priv);
++	INIT_WORK(&priv->multicast_work, lan865x_multicast_work_handler);
++	dev_err(&spi->dev, "[Miles Chen]Before !! oa_tc6_init==> ret = %d\n", ret);
++	priv->tc6 = oa_tc6_init(spi, netdev);
++	if (!priv->tc6) {
++		dev_err(&spi->dev, "[Miles Chen]oa_tc6_init==> ret = %d\n", ret);
++		ret = -ENODEV;
++		goto free_netdev;
++	}
++
++	ret = lan865x_configure_fixup(priv);
++	if (ret) {
++		dev_err(&spi->dev, "Failed to configure fixup: %d\n", ret);
++		goto oa_tc6_exit;
++	}
++
++	/* As per the point s3 in the below errata, SPI receive Ethernet frame
++	 * transfer may halt when starting the next frame in the same data block
++	 * (chunk) as the end of a previous frame. The RFA field should be
++	 * configured to 01b or 10b for proper operation. In these modes, only
++	 * one receive Ethernet frame will be placed in a single data block.
++	 * When the RFA field is written to 01b, received frames will be forced
++	 * to only start in the first word of the data block payload (SWO=0). As
++	 * recommended, ZARFE bit in the OPEN Alliance CONFIG0 register is set
++	 * to 1 for proper operation.
++	 *
++	 * https://ww1.microchip.com/downloads/aemDocuments/documents/AIS/ProductDocuments/Errata/LAN8650-1-Errata-80001075.pdf
++	 */
++	ret = lan865x_set_zarfe(priv);
++	if (ret) {
++		dev_err(&spi->dev, "Failed to set ZARFE: %d\n", ret);
++		goto oa_tc6_exit;
++	}
++
++	/* Get the MAC address from the SPI device tree node */
++	if (device_get_ethdev_address(&spi->dev, netdev))
++		eth_hw_addr_random(netdev);
++
++	ret = lan865x_set_hw_macaddr(priv, netdev->dev_addr);
++	if (ret) {
++		dev_err(&spi->dev, "Failed to configure MAC: %d\n", ret);
++		goto oa_tc6_exit;
++	}
++
++	netdev->if_port = IF_PORT_10BASET;
++	netdev->irq = spi->irq;
++	netdev->netdev_ops = &lan865x_netdev_ops;
++	netdev->ethtool_ops = &lan865x_ethtool_ops;
++
++	ret = register_netdev(netdev);
++	if (ret) {
++		dev_err(&spi->dev, "Register netdev failed (ret = %d)", ret);
++		goto oa_tc6_exit;
++	}
++
++	return 0;
++
++oa_tc6_exit:
++	oa_tc6_exit(priv->tc6);
++free_netdev:
++	free_netdev(priv->netdev);
++	return ret;
++}
++
++static void lan865x_remove(struct spi_device *spi)
++{
++	struct lan865x_priv *priv = spi_get_drvdata(spi);
++
++	cancel_work_sync(&priv->multicast_work);
++	unregister_netdev(priv->netdev);
++	oa_tc6_exit(priv->tc6);
++	free_netdev(priv->netdev);
++}
++
++static const struct spi_device_id spidev_spi_ids[] = {                           
++		{ .name = "lan865x" },
++		{ .name = "lan8650" },
++		{ .name = "lan8651" },
++        {},                                                                      
++};
++
++static const struct of_device_id lan865x_dt_ids[] = {
++	{ .compatible = "microchip,lan865x" },
++	{ .compatible = "microchip,lan8650" },
++	{ .compatible = "microchip,lan8651" },
++	{ /* Sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, lan865x_dt_ids);
++
++static struct spi_driver lan865x_driver = {
++	.driver = {
++		.name = DRV_NAME,
++		.of_match_table = lan865x_dt_ids,
++	 },
++	.probe = lan865x_probe,
++	.remove = lan865x_remove,
++	.id_table = spidev_spi_ids,
++};
++module_spi_driver(lan865x_driver);
++
++MODULE_DESCRIPTION(DRV_NAME " 10Base-T1S MACPHY Ethernet Driver");
++MODULE_AUTHOR("Parthiban Veerasooran <parthiban.veerasooran@microchip.com>");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/net/ethernet/oa_tc6.c b/drivers/net/ethernet/oa_tc6.c
+new file mode 100644
+index 000000000000..99f8408504fe
+--- /dev/null
++++ b/drivers/net/ethernet/oa_tc6.c
+@@ -0,0 +1,1323 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * OPEN Alliance 10BASE‑T1x MAC‑PHY Serial Interface framework
++ *
++ * Author: Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
++ */
++
++#include <linux/bitfield.h>
++#include <linux/iopoll.h>
++#include <linux/mdio.h>
++#include <linux/phy.h>
++#include <linux/oa_tc6.h>
++
++/* OPEN Alliance TC6 registers */
++/* Standard Capabilities Register */
++#define OA_TC6_REG_STDCAP			0x0002
++#define STDCAP_DIRECT_PHY_REG_ACCESS		BIT(8)
++
++/* Reset Control and Status Register */
++#define OA_TC6_REG_RESET			0x0003
++#define RESET_SWRESET				BIT(0)	/* Software Reset */
++
++/* Configuration Register #0 */
++#define OA_TC6_REG_CONFIG0			0x0004
++#define CONFIG0_SYNC				BIT(15)
++
++/* Status Register #0 */
++#define OA_TC6_REG_STATUS0			0x0008
++#define STATUS0_RESETC				BIT(6)	/* Reset Complete */
++#define STATUS0_HEADER_ERROR			BIT(5)
++#define STATUS0_LOSS_OF_FRAME_ERROR		BIT(4)
++#define STATUS0_RX_BUFFER_OVERFLOW_ERROR	BIT(3)
++#define STATUS0_TX_PROTOCOL_ERROR		BIT(0)
++
++/* Buffer Status Register */
++#define OA_TC6_REG_BUFFER_STATUS		0x000B
++#define BUFFER_STATUS_TX_CREDITS_AVAILABLE	GENMASK(15, 8)
++#define BUFFER_STATUS_RX_CHUNKS_AVAILABLE	GENMASK(7, 0)
++
++/* Interrupt Mask Register #0 */
++#define OA_TC6_REG_INT_MASK0			0x000C
++#define INT_MASK0_HEADER_ERR_MASK		BIT(5)
++#define INT_MASK0_LOSS_OF_FRAME_ERR_MASK	BIT(4)
++#define INT_MASK0_RX_BUFFER_OVERFLOW_ERR_MASK	BIT(3)
++#define INT_MASK0_TX_PROTOCOL_ERR_MASK		BIT(0)
++
++/* PHY Clause 22 and 29 registers base address and mask */
++#define OA_TC6_PHY_STD_REG_ADDR_BASE		0xFF00
++#define OA_TC6_PHY_STD_REG_ADDR_MASK		0x3F
++
++/* Control command header */
++#define OA_TC6_CTRL_HEADER_DATA_NOT_CTRL	BIT(31)
++#define OA_TC6_CTRL_HEADER_WRITE_NOT_READ	BIT(29)
++#define OA_TC6_CTRL_HEADER_MEM_MAP_SELECTOR	GENMASK(27, 24)
++#define OA_TC6_CTRL_HEADER_ADDR			GENMASK(23, 8)
++#define OA_TC6_CTRL_HEADER_LENGTH		GENMASK(7, 1)
++#define OA_TC6_CTRL_HEADER_PARITY		BIT(0)
++
++/* Data header */
++#define OA_TC6_DATA_HEADER_DATA_NOT_CTRL	BIT(31)
++#define OA_TC6_DATA_HEADER_DATA_VALID		BIT(21)
++#define OA_TC6_DATA_HEADER_START_VALID		BIT(20)
++#define OA_TC6_DATA_HEADER_START_WORD_OFFSET	GENMASK(19, 16)
++#define OA_TC6_DATA_HEADER_END_VALID		BIT(14)
++#define OA_TC6_DATA_HEADER_END_BYTE_OFFSET	GENMASK(13, 8)
++#define OA_TC6_DATA_HEADER_PARITY		BIT(0)
++
++/* Data footer */
++#define OA_TC6_DATA_FOOTER_EXTENDED_STS		BIT(31)
++#define OA_TC6_DATA_FOOTER_RXD_HEADER_BAD	BIT(30)
++#define OA_TC6_DATA_FOOTER_CONFIG_SYNC		BIT(29)
++#define OA_TC6_DATA_FOOTER_RX_CHUNKS_AVAILABLE	GENMASK(28, 24)
++#define OA_TC6_DATA_FOOTER_DATA_VALID		BIT(21)
++#define OA_TC6_DATA_FOOTER_START_VALID		BIT(20)
++#define OA_TC6_DATA_FOOTER_START_WORD_OFFSET	GENMASK(19, 16)
++#define OA_TC6_DATA_FOOTER_END_VALID		BIT(14)
++#define OA_TC6_DATA_FOOTER_END_BYTE_OFFSET	GENMASK(13, 8)
++#define OA_TC6_DATA_FOOTER_TX_CREDITS		GENMASK(5, 1)
++
++/* PHY – Clause 45 registers memory map selector (MMS) as per table 6 in the
++ * OPEN Alliance specification.
++ */
++#define OA_TC6_PHY_C45_PCS_MMS2			2	/* MMD 3 */
++#define OA_TC6_PHY_C45_PMA_PMD_MMS3		3	/* MMD 1 */
++#define OA_TC6_PHY_C45_VS_PLCA_MMS4		4	/* MMD 31 */
++#define OA_TC6_PHY_C45_AUTO_NEG_MMS5		5	/* MMD 7 */
++#define OA_TC6_PHY_C45_POWER_UNIT_MMS6		6	/* MMD 13 */
++
++#define OA_TC6_CTRL_HEADER_SIZE			4
++#define OA_TC6_CTRL_REG_VALUE_SIZE		4
++#define OA_TC6_CTRL_IGNORED_SIZE		4
++#define OA_TC6_CTRL_MAX_REGISTERS		128
++#define OA_TC6_CTRL_SPI_BUF_SIZE		(OA_TC6_CTRL_HEADER_SIZE +\
++						(OA_TC6_CTRL_MAX_REGISTERS *\
++						OA_TC6_CTRL_REG_VALUE_SIZE) +\
++						OA_TC6_CTRL_IGNORED_SIZE)
++#define OA_TC6_CHUNK_PAYLOAD_SIZE		64
++#define OA_TC6_DATA_HEADER_SIZE			4
++#define OA_TC6_CHUNK_SIZE			(OA_TC6_DATA_HEADER_SIZE +\
++						OA_TC6_CHUNK_PAYLOAD_SIZE)
++#define OA_TC6_TX_SKB_QUEUE_SIZE		2
++#define OA_TC6_MAX_TX_CHUNKS			48
++#define OA_TC6_SPI_DATA_BUF_SIZE		(OA_TC6_MAX_TX_CHUNKS *\
++						OA_TC6_CHUNK_SIZE)
++#define STATUS0_RESETC_POLL_DELAY		1000
++#define STATUS0_RESETC_POLL_TIMEOUT		1000000
++
++#define MDIO_MMD_POWER_UNIT			13      /* PHY Power Unit */
++
++/* Internal structure for MAC-PHY drivers */
++struct oa_tc6 {
++	struct device *dev;
++	struct net_device *netdev;
++	struct phy_device *phydev;
++	struct mii_bus *mdiobus;
++	struct spi_device *spi;
++	struct mutex spi_ctrl_lock; /* Protects spi control transfer */
++	void *spi_ctrl_tx_buf;
++	void *spi_ctrl_rx_buf;
++	void *spi_data_tx_buf;
++	void *spi_data_rx_buf;
++	struct sk_buff_head tx_skb_q;
++	struct sk_buff *tx_skb;
++	struct sk_buff *rx_skb;
++	struct task_struct *spi_thread;
++	wait_queue_head_t spi_wq;
++	u16 tx_skb_offset;
++	u16 spi_data_tx_buf_offset;
++	u16 tx_credits;
++	u8 rx_chunks_available;
++	bool rx_buf_overflow;
++	bool int_flag;
++};
++
++enum oa_tc6_header_type {
++	OA_TC6_CTRL_HEADER,
++	OA_TC6_DATA_HEADER,
++};
++
++enum oa_tc6_register_op {
++	OA_TC6_CTRL_REG_READ = 0,
++	OA_TC6_CTRL_REG_WRITE = 1,
++};
++
++enum oa_tc6_data_valid_info {
++	OA_TC6_DATA_INVALID,
++	OA_TC6_DATA_VALID,
++};
++
++enum oa_tc6_data_start_valid_info {
++	OA_TC6_DATA_START_INVALID,
++	OA_TC6_DATA_START_VALID,
++};
++
++enum oa_tc6_data_end_valid_info {
++	OA_TC6_DATA_END_INVALID,
++	OA_TC6_DATA_END_VALID,
++};
++
++static int oa_tc6_spi_transfer(struct oa_tc6 *tc6,
++			       enum oa_tc6_header_type header_type, u16 length)
++{
++	struct spi_transfer xfer = { 0 };
++	struct spi_message msg;
++
++	if (header_type == OA_TC6_DATA_HEADER) {
++		xfer.tx_buf = tc6->spi_data_tx_buf;
++		xfer.rx_buf = tc6->spi_data_rx_buf;
++	} else {
++		xfer.tx_buf = tc6->spi_ctrl_tx_buf;
++		xfer.rx_buf = tc6->spi_ctrl_rx_buf;
++	}
++	xfer.len = length;
++
++	spi_message_init(&msg);
++	spi_message_add_tail(&xfer, &msg);
++
++	return spi_sync(tc6->spi, &msg);
++}
++
++static int oa_tc6_get_parity(u32 p)
++{
++	/* Public domain code snippet, lifted from
++	 * http://www-graphics.stanford.edu/~seander/bithacks.html
++	 */
++	p ^= p >> 1;
++	p ^= p >> 2;
++	p = (p & 0x11111111U) * 0x11111111U;
++
++	/* Odd parity is used here */
++	return !((p >> 28) & 1);
++}
++
++static __be32 oa_tc6_prepare_ctrl_header(u32 address, u8 length,
++					 enum oa_tc6_register_op reg_op)
++{
++	u32 header;
++
++	header = FIELD_PREP(OA_TC6_CTRL_HEADER_DATA_NOT_CTRL,
++			    OA_TC6_CTRL_HEADER) |
++		 FIELD_PREP(OA_TC6_CTRL_HEADER_WRITE_NOT_READ, reg_op) |
++		 FIELD_PREP(OA_TC6_CTRL_HEADER_MEM_MAP_SELECTOR, address >> 16) |
++		 FIELD_PREP(OA_TC6_CTRL_HEADER_ADDR, address) |
++		 FIELD_PREP(OA_TC6_CTRL_HEADER_LENGTH, length - 1);
++	header |= FIELD_PREP(OA_TC6_CTRL_HEADER_PARITY,
++			     oa_tc6_get_parity(header));
++
++	return cpu_to_be32(header);
++}
++
++static void oa_tc6_update_ctrl_write_data(struct oa_tc6 *tc6, u32 value[],
++					  u8 length)
++{
++	__be32 *tx_buf = tc6->spi_ctrl_tx_buf + OA_TC6_CTRL_HEADER_SIZE;
++
++	for (int i = 0; i < length; i++)
++		*tx_buf++ = cpu_to_be32(value[i]);
++}
++
++static u16 oa_tc6_calculate_ctrl_buf_size(u8 length)
++{
++	/* Control command consists 4 bytes header + 4 bytes register value for
++	 * each register + 4 bytes ignored value.
++	 */
++	return OA_TC6_CTRL_HEADER_SIZE + OA_TC6_CTRL_REG_VALUE_SIZE * length +
++	       OA_TC6_CTRL_IGNORED_SIZE;
++}
++
++static void oa_tc6_prepare_ctrl_spi_buf(struct oa_tc6 *tc6, u32 address,
++					u32 value[], u8 length,
++					enum oa_tc6_register_op reg_op)
++{
++	__be32 *tx_buf = tc6->spi_ctrl_tx_buf;
++
++	*tx_buf = oa_tc6_prepare_ctrl_header(address, length, reg_op);
++
++	if (reg_op == OA_TC6_CTRL_REG_WRITE)
++		oa_tc6_update_ctrl_write_data(tc6, value, length);
++}
++
++static int oa_tc6_check_ctrl_write_reply(struct oa_tc6 *tc6, u8 size)
++{
++	u8 *tx_buf = tc6->spi_ctrl_tx_buf;
++	u8 *rx_buf = tc6->spi_ctrl_rx_buf;
++
++	rx_buf += OA_TC6_CTRL_IGNORED_SIZE;
++
++	/* The echoed control write must match with the one that was
++	 * transmitted.
++	 */
++	if (memcmp(tx_buf, rx_buf, size - OA_TC6_CTRL_IGNORED_SIZE))
++		return -EPROTO;
++
++	return 0;
++}
++
++static int oa_tc6_check_ctrl_read_reply(struct oa_tc6 *tc6, u8 size)
++{
++	u32 *tx_buf = tc6->spi_ctrl_tx_buf;
++	u32 *rx_buf = tc6->spi_ctrl_rx_buf + OA_TC6_CTRL_IGNORED_SIZE;
++
++	/* The echoed control read header must match with the one that was
++	 * transmitted.
++	 */
++	if (*tx_buf != *rx_buf)
++		return -EPROTO;
++
++	return 0;
++}
++
++static void oa_tc6_copy_ctrl_read_data(struct oa_tc6 *tc6, u32 value[],
++				       u8 length)
++{
++	__be32 *rx_buf = tc6->spi_ctrl_rx_buf + OA_TC6_CTRL_IGNORED_SIZE +
++			 OA_TC6_CTRL_HEADER_SIZE;
++
++	for (int i = 0; i < length; i++)
++		value[i] = be32_to_cpu(*rx_buf++);
++}
++
++static int oa_tc6_perform_ctrl(struct oa_tc6 *tc6, u32 address, u32 value[],
++			       u8 length, enum oa_tc6_register_op reg_op)
++{
++	u16 size;
++	int ret;
++
++	/* Prepare control command and copy to SPI control buffer */
++	oa_tc6_prepare_ctrl_spi_buf(tc6, address, value, length, reg_op);
++
++	size = oa_tc6_calculate_ctrl_buf_size(length);
++
++	/* Perform SPI transfer */
++	ret = oa_tc6_spi_transfer(tc6, OA_TC6_CTRL_HEADER, size);
++	if (ret) {
++		dev_err(&tc6->spi->dev, "SPI transfer failed for control: %d\n",
++			ret);
++		return ret;
++	}
++
++	/* Check echoed/received control write command reply for errors */
++	if (reg_op == OA_TC6_CTRL_REG_WRITE)
++		return oa_tc6_check_ctrl_write_reply(tc6, size);
++
++	/* Check echoed/received control read command reply for errors */
++	ret = oa_tc6_check_ctrl_read_reply(tc6, size);
++	if (ret)
++		return ret;
++
++	oa_tc6_copy_ctrl_read_data(tc6, value, length);
++
++	return 0;
++}
++
++/**
++ * oa_tc6_read_registers - function for reading multiple consecutive registers.
++ * @tc6: oa_tc6 struct.
++ * @address: address of the first register to be read in the MAC-PHY.
++ * @value: values to be read from the starting register address @address.
++ * @length: number of consecutive registers to be read from @address.
++ *
++ * Maximum of 128 consecutive registers can be read starting at @address.
++ *
++ * Returns 0 on success otherwise failed.
++ */
++int oa_tc6_read_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
++			  u8 length)
++{
++	int ret;
++
++	if (!length || length > OA_TC6_CTRL_MAX_REGISTERS) {
++		dev_err(&tc6->spi->dev, "Invalid register length parameter\n");
++		return -EINVAL;
++	}
++
++	mutex_lock(&tc6->spi_ctrl_lock);
++	ret = oa_tc6_perform_ctrl(tc6, address, value, length,
++				  OA_TC6_CTRL_REG_READ);
++	mutex_unlock(&tc6->spi_ctrl_lock);
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(oa_tc6_read_registers);
++
++/**
++ * oa_tc6_read_register - function for reading a MAC-PHY register.
++ * @tc6: oa_tc6 struct.
++ * @address: register address of the MAC-PHY to be read.
++ * @value: value read from the @address register address of the MAC-PHY.
++ *
++ * Returns 0 on success otherwise failed.
++ */
++int oa_tc6_read_register(struct oa_tc6 *tc6, u32 address, u32 *value)
++{
++	return oa_tc6_read_registers(tc6, address, value, 1);
++}
++EXPORT_SYMBOL_GPL(oa_tc6_read_register);
++
++/**
++ * oa_tc6_write_registers - function for writing multiple consecutive registers.
++ * @tc6: oa_tc6 struct.
++ * @address: address of the first register to be written in the MAC-PHY.
++ * @value: values to be written from the starting register address @address.
++ * @length: number of consecutive registers to be written from @address.
++ *
++ * Maximum of 128 consecutive registers can be written starting at @address.
++ *
++ * Returns 0 on success otherwise failed.
++ */
++int oa_tc6_write_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
++			   u8 length)
++{
++	int ret;
++
++	if (!length || length > OA_TC6_CTRL_MAX_REGISTERS) {
++		dev_err(&tc6->spi->dev, "Invalid register length parameter\n");
++		return -EINVAL;
++	}
++
++	mutex_lock(&tc6->spi_ctrl_lock);
++	ret = oa_tc6_perform_ctrl(tc6, address, value, length,
++				  OA_TC6_CTRL_REG_WRITE);
++	mutex_unlock(&tc6->spi_ctrl_lock);
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(oa_tc6_write_registers);
++
++/**
++ * oa_tc6_write_register - function for writing a MAC-PHY register.
++ * @tc6: oa_tc6 struct.
++ * @address: register address of the MAC-PHY to be written.
++ * @value: value to be written in the @address register address of the MAC-PHY.
++ *
++ * Returns 0 on success otherwise failed.
++ */
++int oa_tc6_write_register(struct oa_tc6 *tc6, u32 address, u32 value)
++{
++	return oa_tc6_write_registers(tc6, address, &value, 1);
++}
++EXPORT_SYMBOL_GPL(oa_tc6_write_register);
++
++static int oa_tc6_check_phy_reg_direct_access_capability(struct oa_tc6 *tc6)
++{
++	u32 regval;
++	int ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_STDCAP, &regval);
++	if (ret)
++		return ret;
++
++	if (!(regval & STDCAP_DIRECT_PHY_REG_ACCESS))
++		return -ENODEV;
++
++	return 0;
++}
++
++static void oa_tc6_handle_link_change(struct net_device *netdev)
++{
++	phy_print_status(netdev->phydev);
++}
++
++static int oa_tc6_mdiobus_read(struct mii_bus *bus, int addr, int regnum)
++{
++	struct oa_tc6 *tc6 = bus->priv;
++	u32 regval;
++	bool ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_PHY_STD_REG_ADDR_BASE |
++				   (regnum & OA_TC6_PHY_STD_REG_ADDR_MASK),
++				   &regval);
++	if (ret)
++		return -ENODEV;
++
++	return regval;
++}
++
++static int oa_tc6_mdiobus_write(struct mii_bus *bus, int addr, int regnum,
++				u16 val)
++{
++	struct oa_tc6 *tc6 = bus->priv;
++
++	return oa_tc6_write_register(tc6, OA_TC6_PHY_STD_REG_ADDR_BASE |
++				     (regnum & OA_TC6_PHY_STD_REG_ADDR_MASK),
++				     val);
++}
++
++static int oa_tc6_get_phy_c45_mms(int devnum)
++{
++	switch (devnum) {
++	case MDIO_MMD_PCS:
++		return OA_TC6_PHY_C45_PCS_MMS2;
++	case MDIO_MMD_PMAPMD:
++		return OA_TC6_PHY_C45_PMA_PMD_MMS3;
++	case MDIO_MMD_VEND2:
++		return OA_TC6_PHY_C45_VS_PLCA_MMS4;
++	case MDIO_MMD_AN:
++		return OA_TC6_PHY_C45_AUTO_NEG_MMS5;
++	case MDIO_MMD_POWER_UNIT:
++		return OA_TC6_PHY_C45_POWER_UNIT_MMS6;
++	default:
++		return -EOPNOTSUPP;
++	}
++}
++
++static int oa_tc6_mdiobus_read_c45(struct mii_bus *bus, int addr, int devnum,
++				   int regnum)
++{
++	struct oa_tc6 *tc6 = bus->priv;
++	u32 regval;
++	int ret;
++
++	ret = oa_tc6_get_phy_c45_mms(devnum);
++	if (ret < 0)
++		return ret;
++
++	ret = oa_tc6_read_register(tc6, (ret << 16) | regnum, &regval);
++	if (ret)
++		return ret;
++
++	return regval;
++}
++
++static int oa_tc6_mdiobus_write_c45(struct mii_bus *bus, int addr, int devnum,
++				    int regnum, u16 val)
++{
++	struct oa_tc6 *tc6 = bus->priv;
++	int ret;
++
++	ret = oa_tc6_get_phy_c45_mms(devnum);
++	if (ret < 0)
++		return ret;
++
++	return oa_tc6_write_register(tc6, (ret << 16) | regnum, val);
++}
++
++static int oa_tc6_mdiobus_register(struct oa_tc6 *tc6)
++{
++	int ret;
++
++	tc6->mdiobus = mdiobus_alloc();
++	if (!tc6->mdiobus) {
++		netdev_err(tc6->netdev, "MDIO bus alloc failed\n");
++		return -ENOMEM;
++	}
++
++	tc6->mdiobus->priv = tc6;
++	tc6->mdiobus->read = oa_tc6_mdiobus_read;
++	tc6->mdiobus->write = oa_tc6_mdiobus_write;
++	/* OPEN Alliance 10BASE-T1x compliance MAC-PHYs will have both C22 and
++	 * C45 registers space. If the PHY is discovered via C22 bus protocol it
++	 * assumes it uses C22 protocol and always uses C22 registers indirect
++	 * access to access C45 registers. This is because, we don't have a
++	 * clean separation between C22/C45 register space and C22/C45 MDIO bus
++	 * protocols. Resulting, PHY C45 registers direct access can't be used
++	 * which can save multiple SPI bus access. To support this feature, PHY
++	 * drivers can set .read_mmd/.write_mmd in the PHY driver to call
++	 * .read_c45/.write_c45. Ex: drivers/net/phy/microchip_t1s.c
++	 */
++	tc6->mdiobus->read_c45 = oa_tc6_mdiobus_read_c45;
++	tc6->mdiobus->write_c45 = oa_tc6_mdiobus_write_c45;
++	tc6->mdiobus->name = "oa-tc6-mdiobus";
++	tc6->mdiobus->parent = tc6->dev;
++
++	snprintf(tc6->mdiobus->id, ARRAY_SIZE(tc6->mdiobus->id), "%s",
++		 dev_name(&tc6->spi->dev));
++
++	ret = mdiobus_register(tc6->mdiobus);
++	if (ret) {
++		netdev_err(tc6->netdev, "Could not register MDIO bus\n");
++		mdiobus_free(tc6->mdiobus);
++		return ret;
++	}
++
++	return 0;
++}
++
++static void oa_tc6_mdiobus_unregister(struct oa_tc6 *tc6)
++{
++	mdiobus_unregister(tc6->mdiobus);
++	mdiobus_free(tc6->mdiobus);
++}
++
++static int oa_tc6_phy_init(struct oa_tc6 *tc6)
++{
++	int ret;
++
++	ret = oa_tc6_check_phy_reg_direct_access_capability(tc6);
++	if (ret) {
++		netdev_err(tc6->netdev,
++			   "Direct PHY register access is not supported by the MAC-PHY\n");
++		return ret;
++	}
++
++	ret = oa_tc6_mdiobus_register(tc6);
++	if (ret)
++		return ret;
++
++	tc6->phydev = phy_find_first(tc6->mdiobus);
++	if (!tc6->phydev) {
++		netdev_err(tc6->netdev, "No PHY found\n");
++		oa_tc6_mdiobus_unregister(tc6);
++		return -ENODEV;
++	}
++
++	tc6->phydev->is_internal = true;
++	ret = phy_connect_direct(tc6->netdev, tc6->phydev,
++				 &oa_tc6_handle_link_change,
++				 PHY_INTERFACE_MODE_INTERNAL);
++	if (ret) {
++		netdev_err(tc6->netdev, "Can't attach PHY to %s\n",
++			   tc6->mdiobus->id);
++		oa_tc6_mdiobus_unregister(tc6);
++		return ret;
++	}
++
++	phy_attached_info(tc6->netdev->phydev);
++
++	return 0;
++}
++
++static void oa_tc6_phy_exit(struct oa_tc6 *tc6)
++{
++	phy_disconnect(tc6->phydev);
++	oa_tc6_mdiobus_unregister(tc6);
++}
++
++static int oa_tc6_read_status0(struct oa_tc6 *tc6)
++{
++	u32 regval;
++	int ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_STATUS0, &regval);
++	if (ret)
++		return 0;
++
++	return regval;
++}
++
++static int oa_tc6_sw_reset_macphy(struct oa_tc6 *tc6)
++{
++	u32 regval = RESET_SWRESET;
++	int ret;
++
++	ret = oa_tc6_write_register(tc6, OA_TC6_REG_RESET, regval);
++	if (ret)
++		return ret;
++
++	/* Poll for soft reset complete for every 1ms until 1s timeout */
++	ret = readx_poll_timeout(oa_tc6_read_status0, tc6, regval,
++				 regval & STATUS0_RESETC,
++				 STATUS0_RESETC_POLL_DELAY,
++				 STATUS0_RESETC_POLL_TIMEOUT);
++	if (ret)
++		return -ENODEV;
++
++	/* Clear the reset complete status */
++	return oa_tc6_write_register(tc6, OA_TC6_REG_STATUS0, regval);
++}
++
++static int oa_tc6_unmask_macphy_error_interrupts(struct oa_tc6 *tc6)
++{
++	u32 regval;
++	int ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_INT_MASK0, &regval);
++	if (ret)
++		return ret;
++
++	regval &= ~(INT_MASK0_TX_PROTOCOL_ERR_MASK |
++		    INT_MASK0_RX_BUFFER_OVERFLOW_ERR_MASK |
++		    INT_MASK0_LOSS_OF_FRAME_ERR_MASK |
++		    INT_MASK0_HEADER_ERR_MASK);
++
++	return oa_tc6_write_register(tc6, OA_TC6_REG_INT_MASK0, regval);
++}
++
++static int oa_tc6_enable_data_transfer(struct oa_tc6 *tc6)
++{
++	u32 value;
++	int ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_CONFIG0, &value);
++	if (ret)
++		return ret;
++
++	/* Enable configuration synchronization for data transfer */
++	value |= CONFIG0_SYNC;
++
++	return oa_tc6_write_register(tc6, OA_TC6_REG_CONFIG0, value);
++}
++
++static void oa_tc6_cleanup_ongoing_rx_skb(struct oa_tc6 *tc6)
++{
++	if (tc6->rx_skb) {
++		tc6->netdev->stats.rx_dropped++;
++		kfree_skb(tc6->rx_skb);
++		tc6->rx_skb = NULL;
++	}
++}
++
++static void oa_tc6_cleanup_ongoing_tx_skb(struct oa_tc6 *tc6)
++{
++	if (tc6->tx_skb) {
++		tc6->netdev->stats.tx_dropped++;
++		kfree_skb(tc6->tx_skb);
++		tc6->tx_skb = NULL;
++	}
++}
++
++static int oa_tc6_process_extended_status(struct oa_tc6 *tc6)
++{
++	u32 value;
++	int ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_STATUS0, &value);
++	if (ret) {
++		netdev_err(tc6->netdev, "STATUS0 register read failed: %d\n",
++			   ret);
++		return -ENODEV;
++	}
++
++	/* Clear the error interrupts status */
++	ret = oa_tc6_write_register(tc6, OA_TC6_REG_STATUS0, value);
++	if (ret) {
++		netdev_err(tc6->netdev, "STATUS0 register write failed: %d\n",
++			   ret);
++		return -ENODEV;
++	}
++
++	if (FIELD_GET(STATUS0_RX_BUFFER_OVERFLOW_ERROR, value)) {
++		tc6->rx_buf_overflow = true;
++		oa_tc6_cleanup_ongoing_rx_skb(tc6);
++		net_err_ratelimited("%s: Receive buffer overflow error\n",
++				    tc6->netdev->name);
++		return -EAGAIN;
++	}
++	if (FIELD_GET(STATUS0_TX_PROTOCOL_ERROR, value)) {
++		netdev_err(tc6->netdev, "Transmit protocol error\n");
++		return -ENODEV;
++	}
++	/* TODO: Currently loss of frame and header errors are treated as
++	 * non-recoverable errors. They will be handled in the next version.
++	 */
++	if (FIELD_GET(STATUS0_LOSS_OF_FRAME_ERROR, value)) {
++		netdev_err(tc6->netdev, "Loss of frame error\n");
++		return -ENODEV;
++	}
++	if (FIELD_GET(STATUS0_HEADER_ERROR, value)) {
++		netdev_err(tc6->netdev, "Header error\n");
++		return -ENODEV;
++	}
++
++	return 0;
++}
++
++static int oa_tc6_process_rx_chunk_footer(struct oa_tc6 *tc6, u32 footer)
++{
++	/* Process rx chunk footer for the following,
++	 * 1. tx credits
++	 * 2. errors if any from MAC-PHY
++	 * 3. receive chunks available
++	 */
++	tc6->tx_credits = FIELD_GET(OA_TC6_DATA_FOOTER_TX_CREDITS, footer);
++	tc6->rx_chunks_available = FIELD_GET(OA_TC6_DATA_FOOTER_RX_CHUNKS_AVAILABLE,
++					     footer);
++
++	if (FIELD_GET(OA_TC6_DATA_FOOTER_EXTENDED_STS, footer)) {
++		int ret = oa_tc6_process_extended_status(tc6);
++
++		if (ret)
++			return ret;
++	}
++
++	/* TODO: Currently received header bad and configuration unsync errors
++	 * are treated as non-recoverable errors. They will be handled in the
++	 * next version.
++	 */
++	if (FIELD_GET(OA_TC6_DATA_FOOTER_RXD_HEADER_BAD, footer)) {
++		netdev_err(tc6->netdev, "Rxd header bad error\n");
++		return -ENODEV;
++	}
++
++	if (!FIELD_GET(OA_TC6_DATA_FOOTER_CONFIG_SYNC, footer)) {
++		netdev_err(tc6->netdev, "Config unsync error\n");
++		return -ENODEV;
++	}
++
++	return 0;
++}
++
++static void oa_tc6_submit_rx_skb(struct oa_tc6 *tc6)
++{
++	tc6->rx_skb->protocol = eth_type_trans(tc6->rx_skb, tc6->netdev);
++	tc6->netdev->stats.rx_packets++;
++	tc6->netdev->stats.rx_bytes += tc6->rx_skb->len;
++
++	if (netif_rx(tc6->rx_skb) == NET_RX_DROP)
++		tc6->netdev->stats.rx_dropped++;
++
++	tc6->rx_skb = NULL;
++}
++
++static void oa_tc6_update_rx_skb(struct oa_tc6 *tc6, u8 *payload, u8 length)
++{
++	memcpy(skb_put(tc6->rx_skb, length), payload, length);
++}
++
++static int oa_tc6_allocate_rx_skb(struct oa_tc6 *tc6)
++{
++	tc6->rx_skb = netdev_alloc_skb(tc6->netdev, tc6->netdev->mtu + ETH_HLEN +
++				       ETH_FCS_LEN + NET_IP_ALIGN);
++	if (!tc6->rx_skb) {
++		tc6->netdev->stats.rx_dropped++;
++		return -ENOMEM;
++	}
++	skb_reserve(tc6->rx_skb, NET_IP_ALIGN);
++
++	return 0;
++}
++
++static int oa_tc6_prcs_complete_rx_frame(struct oa_tc6 *tc6, u8 *payload,
++					 u16 size)
++{
++	int ret;
++
++	ret = oa_tc6_allocate_rx_skb(tc6);
++	if (ret)
++		return ret;
++
++	oa_tc6_update_rx_skb(tc6, payload, size);
++
++	oa_tc6_submit_rx_skb(tc6);
++
++	return 0;
++}
++
++static int oa_tc6_prcs_rx_frame_start(struct oa_tc6 *tc6, u8 *payload, u16 size)
++{
++	int ret;
++
++	ret = oa_tc6_allocate_rx_skb(tc6);
++	if (ret)
++		return ret;
++
++	oa_tc6_update_rx_skb(tc6, payload, size);
++
++	return 0;
++}
++
++static void oa_tc6_prcs_rx_frame_end(struct oa_tc6 *tc6, u8 *payload, u16 size)
++{
++	oa_tc6_update_rx_skb(tc6, payload, size);
++
++	oa_tc6_submit_rx_skb(tc6);
++}
++
++static void oa_tc6_prcs_ongoing_rx_frame(struct oa_tc6 *tc6, u8 *payload,
++					 u32 footer)
++{
++	oa_tc6_update_rx_skb(tc6, payload, OA_TC6_CHUNK_PAYLOAD_SIZE);
++}
++
++static int oa_tc6_prcs_rx_chunk_payload(struct oa_tc6 *tc6, u8 *payload,
++					u32 footer)
++{
++	u8 start_byte_offset = FIELD_GET(OA_TC6_DATA_FOOTER_START_WORD_OFFSET,
++					 footer) * sizeof(u32);
++	u8 end_byte_offset = FIELD_GET(OA_TC6_DATA_FOOTER_END_BYTE_OFFSET,
++				       footer);
++	bool start_valid = FIELD_GET(OA_TC6_DATA_FOOTER_START_VALID, footer);
++	bool end_valid = FIELD_GET(OA_TC6_DATA_FOOTER_END_VALID, footer);
++	u16 size;
++
++	/* Restart the new rx frame after receiving rx buffer overflow error */
++	if (start_valid && tc6->rx_buf_overflow)
++		tc6->rx_buf_overflow = false;
++
++	if (tc6->rx_buf_overflow)
++		return 0;
++
++	/* Process the chunk with complete rx frame */
++	if (start_valid && end_valid && start_byte_offset < end_byte_offset) {
++		size = end_byte_offset + 1 - start_byte_offset;
++		return oa_tc6_prcs_complete_rx_frame(tc6, &payload[start_byte_offset],
++						     size);
++	}
++
++	/* Process the chunk with only rx frame start */
++	if (start_valid && !end_valid) {
++		size = OA_TC6_CHUNK_PAYLOAD_SIZE - start_byte_offset;
++		return oa_tc6_prcs_rx_frame_start(tc6, &payload[start_byte_offset],
++						  size);
++	}
++
++	/* Process the chunk with only rx frame end */
++	if (end_valid && !start_valid) {
++		size = end_byte_offset + 1;
++		oa_tc6_prcs_rx_frame_end(tc6, payload, size);
++		return 0;
++	}
++
++	/* Process the chunk with previous rx frame end and next rx frame start */
++	if (start_valid && end_valid && start_byte_offset > end_byte_offset) {
++		/* After rx buffer overflow error received, there might be a
++		 * possibility of getting an end valid of a previously
++		 * incomplete rx frame along with the new rx frame start valid.
++		 */
++		if (tc6->rx_skb) {
++			size = end_byte_offset + 1;
++			oa_tc6_prcs_rx_frame_end(tc6, payload, size);
++		}
++		size = OA_TC6_CHUNK_PAYLOAD_SIZE - start_byte_offset;
++		return oa_tc6_prcs_rx_frame_start(tc6, &payload[start_byte_offset],
++						  size);
++	}
++
++	/* Process the chunk with ongoing rx frame data */
++	oa_tc6_prcs_ongoing_rx_frame(tc6, payload, footer);
++
++	return 0;
++}
++
++static u32 oa_tc6_get_rx_chunk_footer(struct oa_tc6 *tc6, u16 footer_offset)
++{
++	u8 *rx_buf = tc6->spi_data_rx_buf;
++	__be32 footer;
++
++	footer = *((__be32 *)&rx_buf[footer_offset]);
++
++	return be32_to_cpu(footer);
++}
++
++static int oa_tc6_process_spi_data_rx_buf(struct oa_tc6 *tc6, u16 length)
++{
++	u16 no_of_rx_chunks = length / OA_TC6_CHUNK_SIZE;
++	u32 footer;
++	int ret;
++
++	/* All the rx chunks in the receive SPI data buffer are examined here */
++	for (int i = 0; i < no_of_rx_chunks; i++) {
++		/* Last 4 bytes in each received chunk consist footer info */
++		footer = oa_tc6_get_rx_chunk_footer(tc6, i * OA_TC6_CHUNK_SIZE +
++						    OA_TC6_CHUNK_PAYLOAD_SIZE);
++
++		ret = oa_tc6_process_rx_chunk_footer(tc6, footer);
++		if (ret)
++			return ret;
++
++		/* If there is a data valid chunks then process it for the
++		 * information needed to determine the validity and the location
++		 * of the receive frame data.
++		 */
++		if (FIELD_GET(OA_TC6_DATA_FOOTER_DATA_VALID, footer)) {
++			u8 *payload = tc6->spi_data_rx_buf + i * OA_TC6_CHUNK_SIZE;
++
++			ret = oa_tc6_prcs_rx_chunk_payload(tc6, payload, footer);
++			if (ret)
++				return ret;
++		}
++	}
++
++	return 0;
++}
++
++static __be32 oa_tc6_prepare_data_header(bool data_valid, bool start_valid,
++					 bool end_valid, u8 end_byte_offset)
++{
++	u32 header = FIELD_PREP(OA_TC6_DATA_HEADER_DATA_NOT_CTRL,
++				OA_TC6_DATA_HEADER) |
++		     FIELD_PREP(OA_TC6_DATA_HEADER_DATA_VALID, data_valid) |
++		     FIELD_PREP(OA_TC6_DATA_HEADER_START_VALID, start_valid) |
++		     FIELD_PREP(OA_TC6_DATA_HEADER_END_VALID, end_valid) |
++		     FIELD_PREP(OA_TC6_DATA_HEADER_END_BYTE_OFFSET,
++				end_byte_offset);
++
++	header |= FIELD_PREP(OA_TC6_DATA_HEADER_PARITY,
++			     oa_tc6_get_parity(header));
++
++	return cpu_to_be32(header);
++}
++
++static void oa_tc6_add_tx_skb_to_spi_buf(struct oa_tc6 *tc6)
++{
++	enum oa_tc6_data_start_valid_info start_valid = OA_TC6_DATA_START_INVALID;
++	enum oa_tc6_data_end_valid_info end_valid = OA_TC6_DATA_END_INVALID;
++	__be32 *tx_buf = tc6->spi_data_tx_buf + tc6->spi_data_tx_buf_offset;
++	u16 remaining_length = tc6->tx_skb->len - tc6->tx_skb_offset;
++	u8 *tx_skb_data = tc6->tx_skb->data + tc6->tx_skb_offset;
++	u8 end_byte_offset = 0;
++	u16 length_to_copy;
++
++	/* Set start valid if the current tx chunk contains the start of the tx
++	 * ethernet frame.
++	 */
++	if (!tc6->tx_skb_offset)
++		start_valid = OA_TC6_DATA_START_VALID;
++
++	/* If the remaining tx skb length is more than the chunk payload size of
++	 * 64 bytes then copy only 64 bytes and leave the ongoing tx skb for
++	 * next tx chunk.
++	 */
++	length_to_copy = min_t(u16, remaining_length, OA_TC6_CHUNK_PAYLOAD_SIZE);
++
++	/* Copy the tx skb data to the tx chunk payload buffer */
++	memcpy(tx_buf + 1, tx_skb_data, length_to_copy);
++	tc6->tx_skb_offset += length_to_copy;
++
++	/* Set end valid if the current tx chunk contains the end of the tx
++	 * ethernet frame.
++	 */
++	if (tc6->tx_skb->len == tc6->tx_skb_offset) {
++		end_valid = OA_TC6_DATA_END_VALID;
++		end_byte_offset = length_to_copy - 1;
++		tc6->tx_skb_offset = 0;
++		tc6->netdev->stats.tx_bytes += tc6->tx_skb->len;
++		tc6->netdev->stats.tx_packets++;
++		kfree_skb(tc6->tx_skb);
++		tc6->tx_skb = NULL;
++	}
++
++	*tx_buf = oa_tc6_prepare_data_header(OA_TC6_DATA_VALID, start_valid,
++					     end_valid, end_byte_offset);
++	tc6->spi_data_tx_buf_offset += OA_TC6_CHUNK_SIZE;
++}
++
++static u16 oa_tc6_prepare_spi_tx_buf_for_tx_skbs(struct oa_tc6 *tc6)
++{
++	u16 used_tx_credits;
++
++	/* Get tx skbs and convert them into tx chunks based on the tx credits
++	 * available.
++	 */
++	for (used_tx_credits = 0; used_tx_credits < tc6->tx_credits;
++	     used_tx_credits++) {
++		if (!tc6->tx_skb)
++			tc6->tx_skb = skb_dequeue(&tc6->tx_skb_q);
++		if (!tc6->tx_skb)
++			break;
++		oa_tc6_add_tx_skb_to_spi_buf(tc6);
++	}
++
++	return used_tx_credits * OA_TC6_CHUNK_SIZE;
++}
++
++static void oa_tc6_add_empty_chunks_to_spi_buf(struct oa_tc6 *tc6,
++					       u16 needed_empty_chunks)
++{
++	__be32 header;
++
++	header = oa_tc6_prepare_data_header(OA_TC6_DATA_INVALID,
++					    OA_TC6_DATA_START_INVALID,
++					    OA_TC6_DATA_END_INVALID, 0);
++
++	while (needed_empty_chunks--) {
++		__be32 *tx_buf = tc6->spi_data_tx_buf + tc6->spi_data_tx_buf_offset;
++
++		*tx_buf = header;
++		tc6->spi_data_tx_buf_offset += OA_TC6_CHUNK_SIZE;
++	}
++}
++
++static u16 oa_tc6_prepare_spi_tx_buf_for_rx_chunks(struct oa_tc6 *tc6, u16 len)
++{
++	u16 tx_chunks = len / OA_TC6_CHUNK_SIZE;
++	u16 needed_empty_chunks;
++
++	/* If there are more chunks to receive than to transmit, we need to add
++	 * enough empty tx chunks to allow the reception of the excess rx
++	 * chunks.
++	 */
++	if (tx_chunks >= tc6->rx_chunks_available)
++		return len;
++
++	needed_empty_chunks = tc6->rx_chunks_available - tx_chunks;
++
++	oa_tc6_add_empty_chunks_to_spi_buf(tc6, needed_empty_chunks);
++
++	return needed_empty_chunks * OA_TC6_CHUNK_SIZE + len;
++}
++
++static int oa_tc6_try_spi_transfer(struct oa_tc6 *tc6)
++{
++	int ret;
++
++	while (true) {
++		u16 spi_length = 0;
++
++		tc6->spi_data_tx_buf_offset = 0;
++
++		if (tc6->tx_skb || !skb_queue_empty(&tc6->tx_skb_q))
++			spi_length = oa_tc6_prepare_spi_tx_buf_for_tx_skbs(tc6);
++
++		if (tc6->rx_chunks_available)
++			spi_length = oa_tc6_prepare_spi_tx_buf_for_rx_chunks(tc6, spi_length);
++
++		if (tc6->int_flag) {
++			tc6->int_flag = false;
++			if (spi_length == 0) {
++				oa_tc6_add_empty_chunks_to_spi_buf(tc6, 1);
++				spi_length = OA_TC6_CHUNK_SIZE;
++			}
++		}
++
++		if (spi_length == 0)
++			break;
++
++		ret = oa_tc6_spi_transfer(tc6, OA_TC6_DATA_HEADER, spi_length);
++		if (ret) {
++			netdev_err(tc6->netdev, "SPI data transfer failed: %d\n",
++				   ret);
++			return ret;
++		}
++
++		ret = oa_tc6_process_spi_data_rx_buf(tc6, spi_length);
++		if (ret) {
++			if (ret == -EAGAIN)
++				continue;
++
++			oa_tc6_cleanup_ongoing_tx_skb(tc6);
++			oa_tc6_cleanup_ongoing_rx_skb(tc6);
++			netdev_err(tc6->netdev, "Device error: %d\n", ret);
++			return ret;
++		}
++
++		if (skb_queue_len(&tc6->tx_skb_q) < OA_TC6_TX_SKB_QUEUE_SIZE &&
++		    netif_queue_stopped(tc6->netdev))
++			netif_wake_queue(tc6->netdev);
++	}
++
++	return 0;
++}
++
++static int oa_tc6_spi_thread_handler(void *data)
++{
++	struct oa_tc6 *tc6 = data;
++	int ret;
++
++	while (likely(!kthread_should_stop())) {
++		/* This kthread will be waken up if there is a tx skb or mac-phy
++		 * interrupt to perform spi transfer with tx chunks.
++		 */
++		wait_event_interruptible(tc6->spi_wq, tc6->int_flag ||
++					 !skb_queue_empty(&tc6->tx_skb_q) ||
++					 kthread_should_stop());
++
++		if (kthread_should_stop())
++			break;
++
++		ret = oa_tc6_try_spi_transfer(tc6);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static int oa_tc6_update_buffer_status_from_register(struct oa_tc6 *tc6)
++{
++	u32 value;
++	int ret;
++
++	/* Initially tx credits and rx chunks available to be updated from the
++	 * register as there is no data transfer performed yet. Later they will
++	 * be updated from the rx footer.
++	 */
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_BUFFER_STATUS, &value);
++	if (ret)
++		return ret;
++
++	tc6->tx_credits = FIELD_GET(BUFFER_STATUS_TX_CREDITS_AVAILABLE, value);
++	tc6->rx_chunks_available = FIELD_GET(BUFFER_STATUS_RX_CHUNKS_AVAILABLE,
++					     value);
++
++	return 0;
++}
++
++static irqreturn_t oa_tc6_macphy_isr(int irq, void *data)
++{
++	struct oa_tc6 *tc6 = data;
++
++	/* MAC-PHY interrupt can occur for the following reasons.
++	 * - availability of tx credits if it was 0 before and not reported in
++	 *   the previous rx footer.
++	 * - availability of rx chunks if it was 0 before and not reported in
++	 *   the previous rx footer.
++	 * - extended status event not reported in the previous rx footer.
++	 */
++	tc6->int_flag = true;
++	/* Wake spi kthread to perform spi transfer */
++	wake_up_interruptible(&tc6->spi_wq);
++
++	return IRQ_HANDLED;
++}
++
++/**
++ * oa_tc6_start_xmit - function for sending the tx skb which consists ethernet
++ * frame.
++ * @tc6: oa_tc6 struct.
++ * @skb: socket buffer in which the ethernet frame is stored.
++ *
++ * Returns NETDEV_TX_OK if the transmit ethernet frame skb added in the tx_skb_q
++ * otherwise returns NETDEV_TX_BUSY.
++ */
++netdev_tx_t oa_tc6_start_xmit(struct oa_tc6 *tc6, struct sk_buff *skb)
++{
++	if (skb_queue_len(&tc6->tx_skb_q) > OA_TC6_TX_SKB_QUEUE_SIZE) {
++		netif_stop_queue(tc6->netdev);
++		return NETDEV_TX_BUSY;
++	}
++
++	if (skb_linearize(skb)) {
++		dev_kfree_skb_any(skb);
++		tc6->netdev->stats.tx_dropped++;
++		return NETDEV_TX_OK;
++	}
++
++	skb_queue_tail(&tc6->tx_skb_q, skb);
++
++	/* Wake spi kthread to perform spi transfer */
++	wake_up_interruptible(&tc6->spi_wq);
++
++	return NETDEV_TX_OK;
++}
++EXPORT_SYMBOL_GPL(oa_tc6_start_xmit);
++
++/**
++ * oa_tc6_init - allocates and initializes oa_tc6 structure.
++ * @spi: device with which data will be exchanged.
++ * @netdev: network device interface structure.
++ *
++ * Returns pointer reference to the oa_tc6 structure if the MAC-PHY
++ * initialization is successful otherwise NULL.
++ */
++struct oa_tc6 *oa_tc6_init(struct spi_device *spi, struct net_device *netdev)
++{
++	struct oa_tc6 *tc6;
++	int ret;
++
++	tc6 = devm_kzalloc(&spi->dev, sizeof(*tc6), GFP_KERNEL);
++	if (!tc6)
++		return NULL;
++
++	tc6->spi = spi;
++	tc6->netdev = netdev;
++	SET_NETDEV_DEV(netdev, &spi->dev);
++	mutex_init(&tc6->spi_ctrl_lock);
++
++	/* Set the SPI controller to pump at realtime priority */
++	tc6->spi->rt = true;
++	spi_setup(tc6->spi);
++
++	tc6->spi_ctrl_tx_buf = devm_kzalloc(&tc6->spi->dev,
++					    OA_TC6_CTRL_SPI_BUF_SIZE, GFP_KERNEL);
++	if (!tc6->spi_ctrl_tx_buf)
++		return NULL;
++
++	tc6->spi_ctrl_rx_buf = devm_kzalloc(&tc6->spi->dev,
++					    OA_TC6_CTRL_SPI_BUF_SIZE, GFP_KERNEL);
++	if (!tc6->spi_ctrl_rx_buf)
++		return NULL;
++
++	tc6->spi_data_tx_buf = devm_kzalloc(&tc6->spi->dev,
++					    OA_TC6_SPI_DATA_BUF_SIZE, GFP_KERNEL);
++	if (!tc6->spi_data_tx_buf)
++		return NULL;
++
++	tc6->spi_data_rx_buf = devm_kzalloc(&tc6->spi->dev,
++					    OA_TC6_SPI_DATA_BUF_SIZE, GFP_KERNEL);
++	if (!tc6->spi_data_rx_buf)
++		return NULL;
++
++	ret = oa_tc6_sw_reset_macphy(tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev,
++			"MAC-PHY software reset failed: %d\n", ret);
++		return NULL;
++	}
++
++	ret = oa_tc6_unmask_macphy_error_interrupts(tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev,
++			"MAC-PHY error interrupts unmask failed: %d\n", ret);
++		return NULL;
++	}
++
++	ret = oa_tc6_phy_init(tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev,
++			"MAC internal PHY initialization failed: %d\n", ret);
++		return NULL;
++	}
++
++	ret = oa_tc6_enable_data_transfer(tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev, "Failed to enable data transfer: %d\n",
++			ret);
++		goto phy_exit;
++	}
++
++	ret = oa_tc6_update_buffer_status_from_register(tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev,
++			"Failed to update buffer status: %d\n", ret);
++		goto phy_exit;
++	}
++
++	skb_queue_head_init(&tc6->tx_skb_q);
++	init_waitqueue_head(&tc6->spi_wq);
++
++	tc6->spi_thread = kthread_run(oa_tc6_spi_thread_handler, tc6,
++				      "oa-tc6-spi-thread");
++	if (IS_ERR(tc6->spi_thread)) {
++		dev_err(&tc6->spi->dev, "Failed to create SPI thread\n");
++		goto phy_exit;
++	}
++
++	sched_set_fifo(tc6->spi_thread);
++
++	ret = devm_request_irq(&tc6->spi->dev, tc6->spi->irq, oa_tc6_macphy_isr,
++			       IRQF_TRIGGER_FALLING, dev_name(&tc6->spi->dev),
++			       tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev, "Failed to request macphy isr %d\n",
++			ret);
++		goto kthread_stop;
++	}
++
++	/* oa_tc6_sw_reset_macphy() function resets and clears the MAC-PHY reset
++	 * complete status. IRQ is also asserted on reset completion and it is
++	 * remain asserted until MAC-PHY receives a data chunk. So performing an
++	 * empty data chunk transmission will deassert the IRQ. Refer section
++	 * 7.7 and 9.2.8.8 in the OPEN Alliance specification for more details.
++	 */
++	tc6->int_flag = true;
++	wake_up_interruptible(&tc6->spi_wq);
++
++	return tc6;
++
++kthread_stop:
++	kthread_stop(tc6->spi_thread);
++phy_exit:
++	oa_tc6_phy_exit(tc6);
++	return NULL;
++}
++EXPORT_SYMBOL_GPL(oa_tc6_init);
++
++/**
++ * oa_tc6_exit - exit function.
++ * @tc6: oa_tc6 struct.
++ */
++void oa_tc6_exit(struct oa_tc6 *tc6)
++{
++	oa_tc6_phy_exit(tc6);
++	kthread_stop(tc6->spi_thread);
++	dev_kfree_skb_any(tc6->tx_skb);
++	dev_kfree_skb_any(tc6->rx_skb);
++	skb_queue_purge(&tc6->tx_skb_q);
++}
++EXPORT_SYMBOL_GPL(oa_tc6_exit);
++
++MODULE_DESCRIPTION("OPEN Alliance 10BASE‑T1x MAC‑PHY Serial Interface Lib");
++MODULE_AUTHOR("Parthiban Veerasooran <parthiban.veerasooran@microchip.com>");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/net/phy/microchip_t1s.c b/drivers/net/phy/microchip_t1s.c
+index 534ca7d1b061..4825dfcf2781 100644
+--- a/drivers/net/phy/microchip_t1s.c
++++ b/drivers/net/phy/microchip_t1s.c
+@@ -4,7 +4,7 @@
+  *
+  * Support: Microchip Phys:
+  *  lan8670/1/2 Rev.B1
+- *  lan8650/1 Rev.B0 Internal PHYs
++ *  lan8650/1 Rev.B0/B1 Internal PHYs
+  */
+ 
+ #include <linux/kernel.h>
+@@ -12,12 +12,20 @@
+ #include <linux/phy.h>
+ 
+ #define PHY_ID_LAN867X_REVB1 0x0007C162
+-#define PHY_ID_LAN865X_REVB0 0x0007C1B3
++#define PHY_ID_LAN867X_REVC1 0x0007C164
++#define PHY_ID_LAN867X_REVC2 0x0007C165
++#define PHY_ID_LAN865X_REVB 0x0007C1B3
+ 
+ #define LAN867X_REG_STS2 0x0019
+ 
+ #define LAN867x_RESET_COMPLETE_STS BIT(11)
+ 
++#define LAN867X_REG_STRAP0		0x12
++#define LAN867X_IF_TYPE			GENMASK(8, 7)
++#define LAN867X_RMII_IF_TYPE		0x1
++#define LAN867X_REG_RMII_FIXUP		0x0093
++#define LAN867X_RMII_FIXUP_VALUE	0x06E9
++
+ #define LAN865X_REG_CFGPARAM_ADDR 0x00D8
+ #define LAN865X_REG_CFGPARAM_DATA 0x00D9
+ #define LAN865X_REG_CFGPARAM_CTRL 0x00DA
+@@ -25,6 +33,11 @@
+ 
+ #define LAN865X_CFGPARAM_READ_ENABLE BIT(1)
+ 
++#define LAN86XX_DISABLE_COL_DET 0x0000
++#define LAN86XX_ENABLE_COL_DET 0x8000
++#define LAN86XX_COL_DET_MASK 0x8000
++#define LAN86XX_REG_COL_DET_CTRL0 0x0087
++
+ /* The arrays below are pulled from the following table from AN1699
+  * Access MMD Address Value Mask
+  * RMW 0x1F 0x00D0 0x0002 0x0E03
+@@ -59,28 +72,30 @@ static const u16 lan867x_revb1_fixup_masks[12] = {
+ 	0x0600, 0x7F00, 0x2000, 0xFFFF,
+ };
+ 
+-/* LAN865x Rev.B0 configuration parameters from AN1760 */
+-static const u32 lan865x_revb0_fixup_registers[28] = {
+-	0x0091, 0x0081, 0x0043, 0x0044,
+-	0x0045, 0x0053, 0x0054, 0x0055,
+-	0x0040, 0x0050, 0x00D0, 0x00E9,
+-	0x00F5, 0x00F4, 0x00F8, 0x00F9,
+-	0x00B0, 0x00B1, 0x00B2, 0x00B3,
+-	0x00B4, 0x00B5, 0x00B6, 0x00B7,
+-	0x00B8, 0x00B9, 0x00BA, 0x00BB,
++/* LAN865x Rev.B0/B1 configuration parameters from AN1760 */
++static const u32 lan865x_revb_fixup_registers[29] = {
++	0x00D0, 0x00E0, 0x00E9, 0x00F5,
++	0x00F4, 0x00F8, 0x00F9, 0x0081,
++	0x0091, 0x00B0, 0x00B1, 0x00B2,
++	0x00B3, 0x00B4, 0x00B5, 0x00B6,
++	0x00B7, 0x00B8, 0x00B9, 0x00BA,
++	0x00BB, 0x0043, 0x0044, 0x0045,
++	0x0053, 0x0054, 0x0055, 0x0040,
++	0x0050,
+ };
+ 
+-static const u16 lan865x_revb0_fixup_values[28] = {
+-	0x9660, 0x00C0, 0x00FF, 0xFFFF,
+-	0x0000, 0x00FF, 0xFFFF, 0x0000,
+-	0x0002, 0x0002, 0x5F21, 0x9E50,
+-	0x1CF8, 0xC020, 0x9B00, 0x4E53,
+-	0x0103, 0x0910, 0x1D26, 0x002A,
+-	0x0103, 0x070D, 0x1720, 0x0027,
+-	0x0509, 0x0E13, 0x1C25, 0x002B,
++static const u16 lan865x_revb_fixup_values[29] = {
++	0x3F31, 0xC000, 0x9E50, 0x1CF8,
++	0xC020, 0x9B00, 0x4E53, 0x0080,
++	0x9660, 0x0103, 0x0910, 0x1D26,
++	0x002A, 0x0103, 0x070D, 0x1720,
++	0x0027, 0x0509, 0x0E13, 0x1C25,
++	0x002B, 0x00FF, 0xFFFF, 0x0000,
++	0x00FF, 0xFFFF, 0x0000, 0x0002,
++	0x0002,
+ };
+ 
+-static const u16 lan865x_revb0_fixup_cfg_regs[5] = {
++static const u16 lan865x_revb_fixup_cfg_regs[5] = {
+ 	0x0084, 0x008A, 0x00AD, 0x00AE, 0x00AF
+ };
+ 
+@@ -92,7 +107,7 @@ static const u16 lan865x_revb0_fixup_cfg_regs[5] = {
+  *
+  * 0x4 refers to memory map selector 4, which maps to MDIO_MMD_VEND2
+  */
+-static int lan865x_revb0_indirect_read(struct phy_device *phydev, u16 addr)
++static int lan865x_indirect_read(struct phy_device *phydev, u16 addr)
+ {
+ 	int ret;
+ 
+@@ -118,7 +133,7 @@ static int lan865x_generate_cfg_offsets(struct phy_device *phydev, s8 offsets[2]
+ 	int ret;
+ 
+ 	for (int i = 0; i < ARRAY_SIZE(fixup_regs); i++) {
+-		ret = lan865x_revb0_indirect_read(phydev, fixup_regs[i]);
++		ret = lan865x_indirect_read(phydev, fixup_regs[i]);
+ 		if (ret < 0)
+ 			return ret;
+ 		if (ret & BIT(4))
+@@ -134,9 +149,9 @@ static int lan865x_read_cfg_params(struct phy_device *phydev, u16 cfg_params[])
+ {
+ 	int ret;
+ 
+-	for (int i = 0; i < ARRAY_SIZE(lan865x_revb0_fixup_cfg_regs); i++) {
++	for (int i = 0; i < ARRAY_SIZE(lan865x_revb_fixup_cfg_regs); i++) {
+ 		ret = phy_read_mmd(phydev, MDIO_MMD_VEND2,
+-				   lan865x_revb0_fixup_cfg_regs[i]);
++				   lan865x_revb_fixup_cfg_regs[i]);
+ 		if (ret < 0)
+ 			return ret;
+ 		cfg_params[i] = (u16)ret;
+@@ -149,9 +164,9 @@ static int lan865x_write_cfg_params(struct phy_device *phydev, u16 cfg_params[])
+ {
+ 	int ret;
+ 
+-	for (int i = 0; i < ARRAY_SIZE(lan865x_revb0_fixup_cfg_regs); i++) {
++	for (int i = 0; i < ARRAY_SIZE(lan865x_revb_fixup_cfg_regs); i++) {
+ 		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2,
+-				    lan865x_revb0_fixup_cfg_regs[i],
++				    lan865x_revb_fixup_cfg_regs[i],
+ 				    cfg_params[i]);
+ 		if (ret)
+ 			return ret;
+@@ -162,7 +177,7 @@ static int lan865x_write_cfg_params(struct phy_device *phydev, u16 cfg_params[])
+ 
+ static int lan865x_setup_cfgparam(struct phy_device *phydev)
+ {
+-	u16 cfg_params[ARRAY_SIZE(lan865x_revb0_fixup_cfg_regs)];
++	u16 cfg_params[ARRAY_SIZE(lan865x_revb_fixup_cfg_regs)];
+ 	u16 cfg_results[5];
+ 	s8 offsets[2];
+ 	int ret;
+@@ -175,35 +190,31 @@ static int lan865x_setup_cfgparam(struct phy_device *phydev)
+ 	if (ret)
+ 		return ret;
+ 
+-	cfg_results[0] = (cfg_params[0] & 0x000F) |
+-			  FIELD_PREP(GENMASK(15, 10), 9 + offsets[0]) |
+-			  FIELD_PREP(GENMASK(15, 4), 14 + offsets[0]);
+-	cfg_results[1] = (cfg_params[1] & 0x03FF) |
+-			  FIELD_PREP(GENMASK(15, 10), 40 + offsets[1]);
+-	cfg_results[2] = (cfg_params[2] & 0xC0C0) |
+-			  FIELD_PREP(GENMASK(15, 8), 5 + offsets[0]) |
+-			  (9 + offsets[0]);
+-	cfg_results[3] = (cfg_params[3] & 0xC0C0) |
+-			  FIELD_PREP(GENMASK(15, 8), 9 + offsets[0]) |
+-			  (14 + offsets[0]);
+-	cfg_results[4] = (cfg_params[4] & 0xC0C0) |
+-			  FIELD_PREP(GENMASK(15, 8), 17 + offsets[0]) |
+-			  (22 + offsets[0]);
++	cfg_results[0] = FIELD_PREP(GENMASK(15, 10), (9 + offsets[0]) & 0x3F) |
++			 FIELD_PREP(GENMASK(15, 4), (14 + offsets[0]) & 0x3F) |
++			 0x03;
++	cfg_results[1] = FIELD_PREP(GENMASK(15, 10), (40 + offsets[1]) & 0x3F);
++	cfg_results[2] = FIELD_PREP(GENMASK(15, 8), (5 + offsets[0]) & 0x3F) |
++			 ((9 + offsets[0]) & 0x3F);
++	cfg_results[3] = FIELD_PREP(GENMASK(15, 8), (9 + offsets[0]) & 0x3F) |
++			 ((14 + offsets[0]) & 0x3F);
++	cfg_results[4] = FIELD_PREP(GENMASK(15, 8), (17 + offsets[0]) & 0x3F) |
++			 ((22 + offsets[0]) & 0x3F);
+ 
+ 	return lan865x_write_cfg_params(phydev, cfg_results);
+ }
+ 
+-static int lan865x_revb0_config_init(struct phy_device *phydev)
++static int lan865x_revb_config_init(struct phy_device *phydev)
+ {
+ 	int ret;
+ 
+ 	/* Reference to AN1760
+ 	 * https://ww1.microchip.com/downloads/aemDocuments/documents/AIS/ProductDocuments/SupportingCollateral/AN-LAN8650-1-Configuration-60001760.pdf
+ 	 */
+-	for (int i = 0; i < ARRAY_SIZE(lan865x_revb0_fixup_registers); i++) {
++	for (int i = 0; i < ARRAY_SIZE(lan865x_revb_fixup_registers); i++) {
+ 		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2,
+-				    lan865x_revb0_fixup_registers[i],
+-				    lan865x_revb0_fixup_values[i]);
++				    lan865x_revb_fixup_registers[i],
++				    lan865x_revb_fixup_values[i]);
+ 		if (ret)
+ 			return ret;
+ 	}
+@@ -213,28 +224,78 @@ static int lan865x_revb0_config_init(struct phy_device *phydev)
+ 	return lan865x_setup_cfgparam(phydev);
+ }
+ 
+-static int lan867x_revb1_config_init(struct phy_device *phydev)
++static int lan867x_reset_complete_status(struct phy_device *phydev)
+ {
+-	int err;
++	int ret;
+ 
+ 	/* The chip completes a reset in 3us, we might get here earlier than
+ 	 * that, as an added margin we'll conditionally sleep 5us.
+ 	 */
+-	err = phy_read_mmd(phydev, MDIO_MMD_VEND2, LAN867X_REG_STS2);
+-	if (err < 0)
+-		return err;
++	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, LAN867X_REG_STS2);
++	if (ret < 0)
++		return ret;
+ 
+-	if (!(err & LAN867x_RESET_COMPLETE_STS)) {
++	if (!(ret & LAN867x_RESET_COMPLETE_STS)) {
+ 		udelay(5);
+-		err = phy_read_mmd(phydev, MDIO_MMD_VEND2, LAN867X_REG_STS2);
+-		if (err < 0)
+-			return err;
+-		if (!(err & LAN867x_RESET_COMPLETE_STS)) {
++		ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, LAN867X_REG_STS2);
++		if (ret < 0)
++			return ret;
++		if (!(ret & LAN867x_RESET_COMPLETE_STS)) {
+ 			phydev_err(phydev, "PHY reset failed\n");
+ 			return -ENODEV;
+ 		}
+ 	}
+ 
++	return 0;
++}
++
++static int lan867x_revc_config_init(struct phy_device *phydev)
++{
++	int ret;
++
++	ret = lan867x_reset_complete_status(phydev);
++	if (ret)
++		return ret;
++
++	/* 26 initial settings are identical between LAN8650/1 rev.B0/B1 (AN1760)
++	 * and LAN8670/1/2 rev.C1/C2 (AN1699). So first 21 register settings in
++	 * the lan865x_revb_fixup_registers and all the 5 register settings from
++	 * lan865x_revb_fixup_cfg_regs are used here instead of duplicating the
++	 * initial settings of LAN8670/1/2 rev.C1/C2.
++	 */
++	for (int i = 0; i < 21; i++) {
++		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2,
++				    lan865x_revb_fixup_registers[i],
++				    lan865x_revb_fixup_values[i]);
++		if (ret)
++			return ret;
++	}
++
++	ret = lan865x_setup_cfgparam(phydev);
++	if (ret)
++		return ret;
++
++	/* As per LAN867x rev.C1/C2 AN1699 configuration note, if the PHY
++	 * interface type is RMII then the below configuration to be done.
++	 */
++	ret = phy_read(phydev, LAN867X_REG_STRAP0);
++	if (ret < 0)
++		return ret;
++	if (FIELD_GET(LAN867X_IF_TYPE, ret) == LAN867X_RMII_IF_TYPE)
++		return phy_write_mmd(phydev, MDIO_MMD_VEND2,
++				     LAN867X_REG_RMII_FIXUP,
++				     LAN867X_RMII_FIXUP_VALUE);
++	return 0;
++}
++
++static int lan867x_revb1_config_init(struct phy_device *phydev)
++{
++	int err;
++
++	err = lan867x_reset_complete_status(phydev);
++	if (err)
++		return err;
++
+ 	/* Reference to AN1699
+ 	 * https://ww1.microchip.com/downloads/aemDocuments/documents/AIS/ProductDocuments/SupportingCollateral/AN-LAN8670-1-2-config-60001699.pdf
+ 	 * AN1699 says Read, Modify, Write, but the Write is not required if the
+@@ -253,6 +314,23 @@ static int lan867x_revb1_config_init(struct phy_device *phydev)
+ 	return 0;
+ }
+ 
++static int lan86xx_c45_plca_set_cfg(struct phy_device *phydev,
++				    const struct phy_plca_cfg *plca_cfg)
++{
++	int ret;
++
++	ret = genphy_c45_plca_set_cfg(phydev, plca_cfg);
++	if(ret)
++		return ret;
++
++	if (plca_cfg->enabled)
++		return phy_modify_mmd(phydev, MDIO_MMD_VEND2, LAN86XX_REG_COL_DET_CTRL0,
++				      LAN86XX_COL_DET_MASK, LAN86XX_DISABLE_COL_DET);
++
++	return phy_modify_mmd(phydev, MDIO_MMD_VEND2, LAN86XX_REG_COL_DET_CTRL0,
++			      LAN86XX_COL_DET_MASK, LAN86XX_ENABLE_COL_DET);
++}
++
+ static int lan86xx_read_status(struct phy_device *phydev)
+ {
+ 	/* The phy has some limitations, namely:
+@@ -276,17 +354,37 @@ static struct phy_driver microchip_t1s_driver[] = {
+ 		.config_init        = lan867x_revb1_config_init,
+ 		.read_status        = lan86xx_read_status,
+ 		.get_plca_cfg	    = genphy_c45_plca_get_cfg,
+-		.set_plca_cfg	    = genphy_c45_plca_set_cfg,
++		.set_plca_cfg	    = lan86xx_c45_plca_set_cfg,
++		.get_plca_status    = genphy_c45_plca_get_status,
++	},
++	{
++		PHY_ID_MATCH_EXACT(PHY_ID_LAN867X_REVC1),
++		.name               = "LAN867X Rev.C1",
++		.features           = PHY_BASIC_T1S_P2MP_FEATURES,
++		.config_init        = lan867x_revc_config_init,
++		.read_status        = lan86xx_read_status,
++		.get_plca_cfg	    = genphy_c45_plca_get_cfg,
++		.set_plca_cfg	    = lan86xx_c45_plca_set_cfg,
++		.get_plca_status    = genphy_c45_plca_get_status,
++	},
++	{
++		PHY_ID_MATCH_EXACT(PHY_ID_LAN867X_REVC2),
++		.name               = "LAN867X Rev.C2",
++		.features           = PHY_BASIC_T1S_P2MP_FEATURES,
++		.config_init        = lan867x_revc_config_init,
++		.read_status        = lan86xx_read_status,
++		.get_plca_cfg	    = genphy_c45_plca_get_cfg,
++		.set_plca_cfg	    = lan86xx_c45_plca_set_cfg,
+ 		.get_plca_status    = genphy_c45_plca_get_status,
+ 	},
+ 	{
+-		PHY_ID_MATCH_EXACT(PHY_ID_LAN865X_REVB0),
+-		.name               = "LAN865X Rev.B0 Internal Phy",
++		PHY_ID_MATCH_EXACT(PHY_ID_LAN865X_REVB),
++		.name               = "LAN865X Rev.B0/B1 Internal Phy",
+ 		.features           = PHY_BASIC_T1S_P2MP_FEATURES,
+-		.config_init        = lan865x_revb0_config_init,
++		.config_init        = lan865x_revb_config_init,
+ 		.read_status        = lan86xx_read_status,
+ 		.get_plca_cfg	    = genphy_c45_plca_get_cfg,
+-		.set_plca_cfg	    = genphy_c45_plca_set_cfg,
++		.set_plca_cfg	    = lan86xx_c45_plca_set_cfg,
+ 		.get_plca_status    = genphy_c45_plca_get_status,
+ 	},
+ };
+@@ -295,7 +393,9 @@ module_phy_driver(microchip_t1s_driver);
+ 
+ static struct mdio_device_id __maybe_unused tbl[] = {
+ 	{ PHY_ID_MATCH_EXACT(PHY_ID_LAN867X_REVB1) },
+-	{ PHY_ID_MATCH_EXACT(PHY_ID_LAN865X_REVB0) },
++	{ PHY_ID_MATCH_EXACT(PHY_ID_LAN867X_REVC1) },
++	{ PHY_ID_MATCH_EXACT(PHY_ID_LAN867X_REVC2) },
++	{ PHY_ID_MATCH_EXACT(PHY_ID_LAN865X_REVB) },
+ 	{ }
+ };
+ 
+diff --git a/include/linux/oa_tc6.h b/include/linux/oa_tc6.h
+new file mode 100644
+index 000000000000..5c7811ac9cbe
+--- /dev/null
++++ b/include/linux/oa_tc6.h
+@@ -0,0 +1,23 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * OPEN Alliance 10BASE‑T1x MAC‑PHY Serial Interface framework
++ *
++ * Link: https://opensig.org/download/document/OPEN_Alliance_10BASET1x_MAC-PHY_Serial_Interface_V1.1.pdf
++ *
++ * Author: Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
++ */
++
++#include <linux/etherdevice.h>
++#include <linux/spi/spi.h>
++
++struct oa_tc6;
++
++struct oa_tc6 *oa_tc6_init(struct spi_device *spi, struct net_device *netdev);
++void oa_tc6_exit(struct oa_tc6 *tc6);
++int oa_tc6_write_register(struct oa_tc6 *tc6, u32 address, u32 value);
++int oa_tc6_write_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
++			   u8 length);
++int oa_tc6_read_register(struct oa_tc6 *tc6, u32 address, u32 *value);
++int oa_tc6_read_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
++			  u8 length);
++netdev_tx_t oa_tc6_start_xmit(struct oa_tc6 *tc6, struct sk_buff *skb);
