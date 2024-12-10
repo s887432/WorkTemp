@@ -1,0 +1,50 @@
+diff --git a/drivers/gpu/drm/bridge/microchip-lvds.c b/drivers/gpu/drm/bridge/microchip-lvds.c
+index aadd3091d559..236f72fbe346 100644
+--- a/drivers/gpu/drm/bridge/microchip-lvds.c
++++ b/drivers/gpu/drm/bridge/microchip-lvds.c
+@@ -82,8 +82,13 @@ static void lvds_serialiser_on(struct mchp_lvds *lvds)
+ 	unsigned long timeout = jiffies + msecs_to_jiffies(LVDS_POLL_TIMEOUT_MS);
+ 
+ 	/* The LVDSC registers can only be written if WPEN is cleared */
+-	lvds_writel(lvds, LVDSC_WPMR, (LVDSC_WPMR_WPKEY_PSSWD &
+-				LVDSC_WPMR_WPKEY_MASK));
++	lvds_writel(lvds, LVDSC_CFGR, (
++		LVDSC_CFGR_DC_UNBALANCED |
++		LVDSC_CFGR_DEN_POL_HIGH |
++		LVDSC_CFGR_PIXSIZE_24BITS));
++
++//	lvds_writel(lvds, LVDSC_WPMR, (LVDSC_WPMR_WPKEY_PSSWD &
++//				LVDSC_WPMR_WPKEY_MASK));
+ 
+ 	/* Wait for the status of configuration registers to be changed */
+ 	while (lvds_readl(lvds, LVDSC_SR) & LVDSC_SR_CS) {
+diff --git a/drivers/gpu/drm/panel/panel-simple.c b/drivers/gpu/drm/panel/panel-simple.c
+index 7b2e5e69e0a3..8169146e4f41 100644
+--- a/drivers/gpu/drm/panel/panel-simple.c
++++ b/drivers/gpu/drm/panel/panel-simple.c
+@@ -4088,6 +4088,17 @@ static const struct panel_desc yes_optoelectronics_ytc700tlag_05_201c = {
+ };
+ 
+ static const struct drm_display_mode sitronix_st7262_lvds_mode = {
++
++	.clock = 35000,
++	.hdisplay = 600,
++	.hsync_start = 600 + 46,
++	.hsync_end = 600 + 46 + 2,
++	.htotal = 600 + 46 + 2 + 44,
++	.vdisplay = 1280,
++	.vsync_start = 1280 + 16,
++	.vsync_end = 1280 + 16 + 2,
++	.vtotal = 1280 + 16 + 2 + 14,
++#if 0
+ 	.clock = 25000,
+ 	.hdisplay = 800,
+ 	.hsync_start = 800 + 88,
+@@ -4097,6 +4108,7 @@ static const struct drm_display_mode sitronix_st7262_lvds_mode = {
+ 	.vsync_start = 480 + 23,
+ 	.vsync_end = 480 + 23 + 5,
+ 	.vtotal = 480 + 23 + 5 + 1,
++#endif
+ };
+ 
+ static const struct panel_desc sitronix_st7262_lvds = {
